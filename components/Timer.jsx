@@ -403,17 +403,24 @@ export default function Timer({
     const wake = () => {
       setIdle(false);
       clearTimeout(idleTimer.current);
-      idleTimer.current = setTimeout(() => setIdle(true), 2600);
+      idleTimer.current = setTimeout(() => setIdle(true), 3500);
+    };
+    const esc = (e) => {
+      if (e.key === "Escape" && !document.fullscreenElement) setFs(false);
     };
     wake();
     window.addEventListener("mousemove", wake);
     window.addEventListener("touchstart", wake);
     window.addEventListener("keydown", wake);
+    window.addEventListener("keydown", esc);
+    document.body.style.overflow = "hidden";
     return () => {
       clearTimeout(idleTimer.current);
       window.removeEventListener("mousemove", wake);
       window.removeEventListener("touchstart", wake);
       window.removeEventListener("keydown", wake);
+      window.removeEventListener("keydown", esc);
+      document.body.style.overflow = "";
     };
   }, [fs]);
 
@@ -433,6 +440,7 @@ export default function Timer({
   /* ------------------------------------------------ PANTALLA COMPLETA */
   const fullscreenView = (
     <div
+      onClick={() => setIdle(false)}
       className={`flex h-full w-full flex-col items-center justify-center bg-base transition-opacity ${
         idle ? "cursor-none" : ""
       }`}
@@ -497,7 +505,14 @@ export default function Timer({
   return (
     <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
       {/* ---------------- reloj ---------------- */}
-      <div ref={shellRef} className={fs ? "h-full w-full" : "card relative overflow-hidden p-6 sm:p-8"}>
+      <div
+        ref={shellRef}
+        className={
+          fs
+            ? "fixed inset-0 z-[70] h-[100dvh] w-screen bg-base"
+            : "card relative overflow-hidden p-6 sm:p-8"
+        }
+      >
         {fs ? (
           fullscreenView
         ) : (
