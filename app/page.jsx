@@ -150,6 +150,7 @@ export default function Page() {
               <Timer
                 groups={groups}
                 settings={settings}
+                setSettings={setSettings}
                 onSaved={refresh}
                 todaySec={todaySec}
                 weekByGroup={weekByGroup}
