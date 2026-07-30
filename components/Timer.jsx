@@ -13,6 +13,12 @@ const MODES = {
   long: { label: "Descanso largo", color: "#38bdf8", short: "Pausa larga" },
 };
 
+const PRESETS = {
+  focus: [15, 25, 30, 45, 50, 60, 90],
+  short: [0, 3, 5, 10, 15],
+  long: [0, 10, 15, 20, 30, 45],
+};
+
 function beep(volume = 0.5, times = 3) {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -42,14 +48,21 @@ function notify(title, body) {
   try {
     if (typeof Notification === "undefined") return;
     if (Notification.permission === "granted") {
-      new Notification(title, { body, icon: "/icon.png", tag: "pomodoro" });
+      new Notification(title, { body, tag: "pomodoro" });
     }
   } catch {
     /* noop */
   }
 }
 
-export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup }) {
+export default function Timer({
+  groups,
+  settings,
+  setSettings,
+  onSaved,
+  todaySec,
+  weekByGroup,
+}) {
   const parents = useMemo(() => groups.filter((g) => !g.parent_id && !g.archived), [groups]);
 
   const [mode, setMode] = useState("focus");
@@ -63,6 +76,22 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
   const [noteFor, setNoteFor] = useState(null);
   const [note, setNote] = useState("");
   const [flash, setFlash] = useState("");
+
+  // modo libre (cuenta para arriba)
+  const [freeMode, setFreeMode] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [runStart, setRunStart] = useState(null);
+
+  // edición inline de la duración
+  const [editing, setEditing] = useState(false);
+  const [draftMin, setDraftMin] = useState("");
+
+  // pantalla completa
+  const [fs, setFs] = useState(false);
+  const [idle, setIdle] = useState(false);
+  const shellRef = useRef(null);
+  const idleTimer = useRef(null);
+
   const restored = useRef(false);
 
   const durationOf = useCallback(
@@ -77,33 +106,45 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
     [groups, groupId]
   );
 
-  // ---------- restaurar estado del timer tras un refresh ----------
+  const countUp = freeMode && mode === "focus";
+
+  // ---------- restaurar tras un refresh ----------
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
     try {
       const raw = localStorage.getItem(TIMER_KEY);
-      if (raw) {
-        const s = JSON.parse(raw);
-        setMode(s.mode || "focus");
-        setCycle(s.cycle || 0);
-        setGroupId(s.groupId || "");
-        setSubId(s.subId || "");
-        if (s.running && s.endAt && s.endAt > Date.now()) {
-          setEndAt(s.endAt);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      setMode(s.mode || "focus");
+      setCycle(s.cycle || 0);
+      setGroupId(s.groupId || "");
+      setSubId(s.subId || "");
+      setFreeMode(!!s.freeMode);
+
+      if (s.freeMode && s.mode === "focus") {
+        setElapsed(s.elapsed || 0);
+        if (s.running && s.runStart) {
+          setRunStart(s.runStart);
+          setElapsed((Date.now() - s.runStart) / 1000);
           setStartedAt(s.startedAt);
-          setRemaining((s.endAt - Date.now()) / 1000);
           setRunning(true);
-          return;
         }
-        setRemaining(s.remaining ?? durationOf(s.mode || "focus"));
+        return;
       }
+      if (s.running && s.endAt && s.endAt > Date.now()) {
+        setEndAt(s.endAt);
+        setStartedAt(s.startedAt);
+        setRemaining((s.endAt - Date.now()) / 1000);
+        setRunning(true);
+        return;
+      }
+      setRemaining(s.remaining ?? durationOf(s.mode || "focus"));
     } catch {
       /* noop */
     }
   }, [durationOf]);
 
-  // ---------- primer grupo por defecto ----------
   useEffect(() => {
     if (!groupId && parents.length) setGroupId(parents[0].id);
   }, [parents, groupId]);
@@ -119,22 +160,63 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
     if (!restored.current) return;
     localStorage.setItem(
       TIMER_KEY,
-      JSON.stringify({ mode, running, endAt, remaining, startedAt, cycle, groupId, subId })
+      JSON.stringify({
+        mode,
+        running,
+        endAt,
+        remaining,
+        startedAt,
+        cycle,
+        groupId,
+        subId,
+        freeMode,
+        elapsed,
+        runStart,
+      })
     );
-  }, [mode, running, endAt, remaining, startedAt, cycle, groupId, subId]);
+  }, [mode, running, endAt, remaining, startedAt, cycle, groupId, subId, freeMode, elapsed, runStart]);
 
-  // ---------- si cambian las duraciones y está parado ----------
   useEffect(() => {
-    if (!running) setRemaining(durationOf(mode));
+    if (!running && !countUp) setRemaining(durationOf(mode));
   }, [settings.focusMin, settings.shortMin, settings.longMin]); // eslint-disable-line
 
   const activeGroupId = subId || groupId;
   const duration = durationOf(mode);
-  const progress = duration > 0 ? 1 - remaining / duration : 0;
+  const progress = countUp
+    ? (elapsed % 3600) / 3600
+    : duration > 0
+    ? 1 - remaining / duration
+    : 0;
+
+  // ---------- guardar sesión ----------
+  const saveSession = useCallback(
+    async (seconds) => {
+      if (seconds < 60 || !activeGroupId) return null;
+      try {
+        const saved = await createSession({
+          group_id: activeGroupId,
+          mode: "focus",
+          started_at: new Date(startedAt || Date.now() - seconds * 1000).toISOString(),
+          ended_at: new Date().toISOString(),
+          duration_seconds: seconds,
+          local_date: todayKey(),
+        });
+        onSaved?.();
+        setFlash(`Guardado · ${fmtDur(seconds)}`);
+        setTimeout(() => setFlash(""), 3200);
+        return saved;
+      } catch (e) {
+        setFlash("Error al guardar: " + (e.message || e));
+        setTimeout(() => setFlash(""), 5000);
+        return null;
+      }
+    },
+    [activeGroupId, onSaved, startedAt]
+  );
 
   const finish = useCallback(
     async (completed) => {
-      const elapsed = completed ? duration : duration - remaining;
+      const elapsedSec = completed ? duration : duration - remaining;
       const wasFocus = mode === "focus";
       setRunning(false);
       setEndAt(null);
@@ -142,24 +224,7 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
       if (settings.sound) beep(settings.volume, completed ? 3 : 1);
 
       let saved = null;
-      if (wasFocus && elapsed >= 60 && activeGroupId) {
-        try {
-          saved = await createSession({
-            group_id: activeGroupId,
-            mode: "focus",
-            started_at: new Date(startedAt || Date.now() - elapsed * 1000).toISOString(),
-            ended_at: new Date().toISOString(),
-            duration_seconds: elapsed,
-            local_date: todayKey(),
-          });
-          onSaved?.();
-          setFlash(`Guardado · ${fmtDur(elapsed)}`);
-          setTimeout(() => setFlash(""), 3200);
-        } catch (e) {
-          setFlash("Error al guardar: " + (e.message || e));
-          setTimeout(() => setFlash(""), 5000);
-        }
-      }
+      if (wasFocus) saved = await saveSession(elapsedSec);
 
       if (completed && settings.notifications) {
         notify(
@@ -168,23 +233,25 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
         );
       }
 
-      // siguiente modo
+      // siguiente modo (si el descanso dura 0, se saltea)
       let next = "focus";
       let nextCycle = cycle;
       if (wasFocus) {
         nextCycle = cycle + 1;
-        next = nextCycle % Math.max(1, settings.longEvery) === 0 ? "long" : "short";
+        const candidate =
+          nextCycle % Math.max(1, settings.longEvery) === 0 ? "long" : "short";
+        next = durationOf(candidate) > 0 ? candidate : "focus";
       }
       setCycle(nextCycle);
       setMode(next);
       setRemaining(durationOf(next));
+      setStartedAt(null);
 
       if (completed) {
         const auto = next === "focus" ? settings.autoStartFocus : settings.autoStartBreaks;
-        if (auto) {
-          const end = Date.now() + durationOf(next) * 1000;
+        if (auto && durationOf(next) > 0) {
           setStartedAt(Date.now());
-          setEndAt(end);
+          setEndAt(Date.now() + durationOf(next) * 1000);
           setRunning(true);
         }
       }
@@ -194,17 +261,7 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
         setNoteFor(saved.id);
       }
     },
-    [
-      activeGroupId,
-      cycle,
-      duration,
-      durationOf,
-      mode,
-      onSaved,
-      remaining,
-      settings,
-      startedAt,
-    ]
+    [cycle, duration, durationOf, mode, remaining, saveSession, settings]
   );
 
   // ---------- tick ----------
@@ -214,7 +271,16 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
   }, [finish]);
 
   useEffect(() => {
-    if (!running || !endAt) return;
+    if (!running) return;
+
+    if (countUp) {
+      const id = setInterval(() => {
+        if (runStart) setElapsed((Date.now() - runStart) / 1000);
+      }, 250);
+      return () => clearInterval(id);
+    }
+
+    if (!endAt) return;
     const id = setInterval(() => {
       const left = (endAt - Date.now()) / 1000;
       if (left <= 0) {
@@ -225,26 +291,36 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
       }
     }, 250);
     return () => clearInterval(id);
-  }, [running, endAt]);
+  }, [running, endAt, countUp, runStart]);
 
-  // ---------- título de la pestaña ----------
   useEffect(() => {
     document.title = running
-      ? `${fmtClock(remaining)} · ${MODES[mode].short}`
+      ? `${fmtClock(countUp ? elapsed : remaining)} · ${MODES[mode].short}`
       : "Pomodoro · Fabri";
-  }, [remaining, running, mode]);
+  }, [remaining, elapsed, running, mode, countUp]);
 
+  // ---------- controles ----------
   const start = () => {
     if (settings.notifications && typeof Notification !== "undefined") {
       if (Notification.permission === "default") Notification.requestPermission();
     }
-    const end = Date.now() + remaining * 1000;
+    if (countUp) {
+      setRunStart(Date.now() - elapsed * 1000);
+      setStartedAt(startedAt || Date.now());
+      setRunning(true);
+      return;
+    }
     setStartedAt(startedAt || Date.now());
-    setEndAt(end);
+    setEndAt(Date.now() + remaining * 1000);
     setRunning(true);
   };
 
   const pause = () => {
+    if (countUp) {
+      setElapsed(runStart ? (Date.now() - runStart) / 1000 : elapsed);
+      setRunning(false);
+      return;
+    }
     setRemaining(Math.max(0, (endAt - Date.now()) / 1000));
     setEndAt(null);
     setRunning(false);
@@ -254,15 +330,45 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
     setRunning(false);
     setEndAt(null);
     setStartedAt(null);
+    setRunStart(null);
+    setElapsed(0);
     setRemaining(durationOf(mode));
+  };
+
+  const stopFree = async () => {
+    const secs = runStart && running ? (Date.now() - runStart) / 1000 : elapsed;
+    setRunning(false);
+    setRunStart(null);
+    if (settings.sound) beep(settings.volume, 2);
+    const saved = await saveSession(Math.round(secs));
+    setElapsed(0);
+    setStartedAt(null);
+    if (saved && settings.askNote) {
+      setNote("");
+      setNoteFor(saved.id);
+    }
   };
 
   const switchMode = (m) => {
     setRunning(false);
     setEndAt(null);
     setStartedAt(null);
+    setRunStart(null);
+    setElapsed(0);
     setMode(m);
     setRemaining(durationOf(m));
+  };
+
+  const applyMinutes = (min) => {
+    const v = Math.max(0, Math.min(600, Math.round(Number(min) || 0)));
+    const key = mode === "focus" ? "focusMin" : mode === "short" ? "shortMin" : "longMin";
+    if (mode === "focus" && v < 1) return;
+    setSettings({ ...settings, [key]: v });
+    setRunning(false);
+    setEndAt(null);
+    setStartedAt(null);
+    setRemaining(v * 60);
+    setEditing(false);
   };
 
   const saveNote = async () => {
@@ -273,6 +379,44 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
     setNoteFor(null);
   };
 
+  // ---------- pantalla completa ----------
+  const toggleFs = async () => {
+    try {
+      if (!document.fullscreenElement) await shellRef.current?.requestFullscreen?.();
+      else await document.exitFullscreen();
+    } catch {
+      setFs((v) => !v); // fallback: overlay sin API nativa
+    }
+  };
+
+  useEffect(() => {
+    const h = () => setFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", h);
+    return () => document.removeEventListener("fullscreenchange", h);
+  }, []);
+
+  useEffect(() => {
+    if (!fs) {
+      setIdle(false);
+      return;
+    }
+    const wake = () => {
+      setIdle(false);
+      clearTimeout(idleTimer.current);
+      idleTimer.current = setTimeout(() => setIdle(true), 2600);
+    };
+    wake();
+    window.addEventListener("mousemove", wake);
+    window.addEventListener("touchstart", wake);
+    window.addEventListener("keydown", wake);
+    return () => {
+      clearTimeout(idleTimer.current);
+      window.removeEventListener("mousemove", wake);
+      window.removeEventListener("touchstart", wake);
+      window.removeEventListener("keydown", wake);
+    };
+  }, [fs]);
+
   // ---------- meta semanal ----------
   const parent = parents.find((g) => g.id === groupId);
   const goalMin = parent?.weekly_goal_minutes || 0;
@@ -282,119 +426,296 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
   const color = MODES[mode].color;
   const R = 132;
   const C = 2 * Math.PI * R;
+  const clock = fmtClock(countUp ? elapsed : remaining);
+  const activeName =
+    groups.find((g) => g.id === activeGroupId)?.name || "Sin grupo";
+
+  /* ------------------------------------------------ PANTALLA COMPLETA */
+  const fullscreenView = (
+    <div
+      className={`flex h-full w-full flex-col items-center justify-center bg-base transition-opacity ${
+        idle ? "cursor-none" : ""
+      }`}
+    >
+      <p
+        className={`mb-6 text-sm font-semibold uppercase tracking-[.3em] text-muted transition-opacity duration-500 ${
+          idle ? "opacity-30" : "opacity-100"
+        }`}
+      >
+        {mode === "focus" ? activeName : MODES[mode].label}
+      </p>
+
+      <div
+        className="tnum select-none font-bold leading-none tracking-tight"
+        style={{
+          fontSize: "min(26vw, 34vh)",
+          color: running ? "#e9ecf6" : color,
+          textShadow: `0 0 90px ${color}44`,
+        }}
+      >
+        {clock}
+      </div>
+
+      <div
+        className={`mt-12 flex items-center gap-3 transition-opacity duration-500 ${
+          idle ? "pointer-events-none opacity-0" : "opacity-100"
+        }`}
+      >
+        {running ? (
+          <button onClick={pause} className="btn-ghost px-8 py-3 text-base">
+            Pausar
+          </button>
+        ) : (
+          <button
+            onClick={start}
+            className="btn px-8 py-3 text-base font-bold text-white"
+            style={{ background: color }}
+          >
+            {countUp ? (elapsed > 0 ? "Seguir" : "Iniciar") : remaining < duration ? "Seguir" : "Iniciar"}
+          </button>
+        )}
+        {countUp ? (
+          <button onClick={stopFree} className="btn-ghost px-6 py-3">
+            Frenar y guardar
+          </button>
+        ) : (
+          <button onClick={reset} className="btn-ghost px-6 py-3">
+            Reiniciar
+          </button>
+        )}
+        <button onClick={toggleFs} className="btn-quiet px-6 py-3">
+          Salir
+        </button>
+      </div>
+
+      {flash && (
+        <p className="mt-6 text-sm font-semibold text-rest animate-fadeUp">{flash}</p>
+      )}
+    </div>
+  );
 
   return (
     <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
       {/* ---------------- reloj ---------------- */}
-      <div className="card relative overflow-hidden p-6 sm:p-8">
-        <div
-          className="pointer-events-none absolute -top-32 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full blur-[90px] transition-colors duration-700"
-          style={{ background: `${color}33` }}
-        />
-
-        <div className="relative flex flex-wrap items-center justify-center gap-2">
-          {Object.entries(MODES).map(([k, v]) => (
-            <button
-              key={k}
-              onClick={() => switchMode(k)}
-              className={`chip ${mode === k ? "chip-on" : ""}`}
-              style={mode === k ? { borderColor: `${v.color}88`, background: `${v.color}1f` } : undefined}
-            >
-              <span className="h-2 w-2 rounded-full" style={{ background: v.color }} />
-              {v.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="relative mx-auto mt-7 flex h-[300px] w-[300px] items-center justify-center">
-          <svg width="300" height="300" className="absolute -rotate-90">
-            <circle cx="150" cy="150" r={R} fill="none" stroke="#1c2131" strokeWidth="12" />
-            <circle
-              cx="150"
-              cy="150"
-              r={R}
-              fill="none"
-              stroke={color}
-              strokeWidth="12"
-              strokeLinecap="round"
-              strokeDasharray={C}
-              strokeDashoffset={C * (1 - progress)}
-              style={{
-                transition: "stroke-dashoffset .3s linear, stroke .5s",
-                filter: `drop-shadow(0 0 12px ${color}66)`,
-              }}
+      <div ref={shellRef} className={fs ? "h-full w-full" : "card relative overflow-hidden p-6 sm:p-8"}>
+        {fs ? (
+          fullscreenView
+        ) : (
+          <>
+            <div
+              className="pointer-events-none absolute -top-32 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full blur-[90px] transition-colors duration-700"
+              style={{ background: `${color}33` }}
             />
-          </svg>
-          <div className="relative text-center">
-            <div className="tnum text-[64px] font-bold leading-none tracking-tight sm:text-[72px]">
-              {fmtClock(remaining)}
+
+            <div className="relative flex flex-wrap items-center justify-center gap-2">
+              {Object.entries(MODES).map(([k, v]) => {
+                const off = k !== "focus" && durationOf(k) === 0;
+                return (
+                  <button
+                    key={k}
+                    onClick={() => switchMode(k)}
+                    className={`chip ${mode === k ? "chip-on" : ""} ${off ? "opacity-45" : ""}`}
+                    style={
+                      mode === k
+                        ? { borderColor: `${v.color}88`, background: `${v.color}1f` }
+                        : undefined
+                    }
+                  >
+                    <span className="h-2 w-2 rounded-full" style={{ background: v.color }} />
+                    {v.label}
+                    {off && <span className="text-[10px]">· off</span>}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => {
+                  setFreeMode((v) => !v);
+                  setRunning(false);
+                  setEndAt(null);
+                  setElapsed(0);
+                  setRunStart(null);
+                  setMode("focus");
+                  setRemaining(durationOf("focus"));
+                }}
+                className={`chip ${freeMode ? "chip-on" : ""}`}
+                title="Cronómetro libre, sin límite de tiempo"
+              >
+                ∞ Libre
+              </button>
             </div>
-            <div className="mt-2 text-xs font-semibold uppercase tracking-[.2em] text-muted">
-              {MODES[mode].label}
-            </div>
-            <div className="mt-3 flex items-center justify-center gap-1.5">
-              {Array.from({ length: Math.max(1, settings.longEvery) }).map((_, i) => (
-                <span
-                  key={i}
-                  className="h-1.5 w-1.5 rounded-full transition-colors"
+
+            <div className="relative mx-auto mt-7 flex h-[300px] w-[300px] items-center justify-center">
+              <svg width="300" height="300" className="absolute -rotate-90">
+                <circle cx="150" cy="150" r={R} fill="none" stroke="#1c2131" strokeWidth="12" />
+                <circle
+                  cx="150"
+                  cy="150"
+                  r={R}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth="12"
+                  strokeLinecap="round"
+                  strokeDasharray={C}
+                  strokeDashoffset={C * (1 - progress)}
                   style={{
-                    background:
-                      i < cycle % Math.max(1, settings.longEvery) ? color : "#2a3145",
+                    transition: "stroke-dashoffset .3s linear, stroke .5s",
+                    filter: `drop-shadow(0 0 12px ${color}66)`,
                   }}
                 />
-              ))}
+              </svg>
+
+              <div className="relative text-center">
+                {editing ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <input
+                      autoFocus
+                      type="number"
+                      min={mode === "focus" ? 1 : 0}
+                      max="600"
+                      value={draftMin}
+                      onChange={(e) => setDraftMin(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") applyMinutes(draftMin);
+                        if (e.key === "Escape") setEditing(false);
+                      }}
+                      className="field w-32 text-center text-3xl font-bold"
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={() => applyMinutes(draftMin)} className="btn-primary px-3 py-1 text-xs">
+                        Aplicar
+                      </button>
+                      <button onClick={() => setEditing(false)} className="btn-quiet px-3 py-1 text-xs">
+                        Cancelar
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted">minutos</p>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        if (countUp) return;
+                        setDraftMin(String(Math.round(duration / 60)));
+                        setEditing(true);
+                      }}
+                      className="tnum block text-[64px] font-bold leading-none tracking-tight transition hover:opacity-80 sm:text-[72px]"
+                      title={countUp ? "" : "Tocá para cambiar la duración"}
+                    >
+                      {clock}
+                    </button>
+                    <div className="mt-2 text-xs font-semibold uppercase tracking-[.2em] text-muted">
+                      {countUp ? "Modo libre" : MODES[mode].label}
+                    </div>
+                  </>
+                )}
+
+                {!editing && !countUp && (
+                  <div className="mt-3 flex items-center justify-center gap-1.5">
+                    {Array.from({ length: Math.max(1, settings.longEvery) }).map((_, i) => (
+                      <span
+                        key={i}
+                        className="h-1.5 w-1.5 rounded-full transition-colors"
+                        style={{
+                          background: i < cycle % Math.max(1, settings.longEvery) ? color : "#2a3145",
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </div>
 
-        <div className="relative mt-7 flex flex-wrap items-center justify-center gap-2.5">
-          {running ? (
-            <button onClick={pause} className="btn-ghost min-w-[130px] py-3 text-base">
-              Pausar
-            </button>
-          ) : (
-            <button
-              onClick={start}
-              className="btn min-w-[130px] py-3 text-base font-bold text-white"
-              style={{ background: color, boxShadow: `0 12px 34px -14px ${color}` }}
-            >
-              {remaining < duration ? "Seguir" : "Iniciar"}
-            </button>
-          )}
-          <button onClick={reset} className="btn-ghost py-3">
-            Reiniciar
-          </button>
-          {mode === "focus" && remaining < duration - 59 && (
-            <button onClick={() => finish(false)} className="btn-ghost py-3">
-              Frenar y guardar
-            </button>
-          )}
-          <button onClick={() => finish(false)} className="btn-quiet py-3" title="Saltar al siguiente">
-            Saltar →
-          </button>
-        </div>
+            {/* presets rápidos */}
+            {!countUp && (
+              <div className="relative mt-5 flex flex-wrap items-center justify-center gap-1.5">
+                {PRESETS[mode].map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => applyMinutes(p)}
+                    className={`chip px-2.5 py-1 text-[11px] ${
+                      Math.round(duration / 60) === p ? "chip-on" : ""
+                    }`}
+                  >
+                    {p === 0 ? "sin descanso" : `${p}m`}
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    setDraftMin(String(Math.round(duration / 60)));
+                    setEditing(true);
+                  }}
+                  className="chip border-dashed px-2.5 py-1 text-[11px]"
+                >
+                  otro…
+                </button>
+              </div>
+            )}
 
-        {flash && (
-          <p className="relative mt-4 text-center text-sm font-semibold text-rest animate-fadeUp">
-            {flash}
-          </p>
-        )}
-        {mode === "focus" && !activeGroupId && (
-          <p className="relative mt-4 text-center text-xs text-focus">
-            Elegí un grupo para que la sesión se guarde.
-          </p>
+            <div className="relative mt-6 flex flex-wrap items-center justify-center gap-2.5">
+              {running ? (
+                <button onClick={pause} className="btn-ghost min-w-[130px] py-3 text-base">
+                  Pausar
+                </button>
+              ) : (
+                <button
+                  onClick={start}
+                  className="btn min-w-[130px] py-3 text-base font-bold text-white"
+                  style={{ background: color, boxShadow: `0 12px 34px -14px ${color}` }}
+                >
+                  {countUp
+                    ? elapsed > 0
+                      ? "Seguir"
+                      : "Iniciar"
+                    : remaining < duration
+                    ? "Seguir"
+                    : "Iniciar"}
+                </button>
+              )}
+
+              {countUp ? (
+                <button onClick={stopFree} disabled={elapsed < 60} className="btn-ghost py-3">
+                  Frenar y guardar
+                </button>
+              ) : (
+                <>
+                  <button onClick={reset} className="btn-ghost py-3">
+                    Reiniciar
+                  </button>
+                  {mode === "focus" && remaining < duration - 59 && (
+                    <button onClick={() => finish(false)} className="btn-ghost py-3">
+                      Frenar y guardar
+                    </button>
+                  )}
+                  <button onClick={() => finish(false)} className="btn-quiet py-3">
+                    Saltar →
+                  </button>
+                </>
+              )}
+
+              <button onClick={toggleFs} className="btn-quiet py-3" title="Pantalla completa">
+                ⛶ Pantalla completa
+              </button>
+            </div>
+
+            {flash && (
+              <p className="relative mt-4 text-center text-sm font-semibold text-rest animate-fadeUp">
+                {flash}
+              </p>
+            )}
+            {mode === "focus" && !activeGroupId && (
+              <p className="relative mt-4 text-center text-xs text-focus">
+                Elegí un grupo para que la sesión se guarde.
+              </p>
+            )}
+          </>
         )}
       </div>
 
       {/* ---------------- panel lateral ---------------- */}
-      <div className="flex flex-col gap-4">
+      <div className={`flex flex-col gap-4 ${fs ? "hidden" : ""}`}>
         <div className="card p-5">
           <p className="label">¿En qué estás trabajando?</p>
-          <select
-            className="field"
-            value={groupId}
-            onChange={(e) => setGroupId(e.target.value)}
-          >
+          <select className="field" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
             {parents.length === 0 && <option value="">Creá un grupo primero</option>}
             {parents.map((g) => (
               <option key={g.id} value={g.id}>
@@ -407,10 +728,7 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
             <>
               <p className="label mt-4">Subgrupo</p>
               <div className="flex flex-wrap gap-1.5">
-                <button
-                  onClick={() => setSubId("")}
-                  className={`chip ${!subId ? "chip-on" : ""}`}
-                >
+                <button onClick={() => setSubId("")} className={`chip ${!subId ? "chip-on" : ""}`}>
                   General
                 </button>
                 {subs.map((s) => (
@@ -437,7 +755,7 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
               <div className="mb-1.5 flex items-baseline justify-between text-xs">
                 <span className="text-muted">Meta semanal · {parent?.name}</span>
                 <span className="tnum font-semibold">
-                  {fmtDur(weekSec)} / {Math.round(goalMin / 60)}h
+                  {fmtDur(weekSec)} / {Math.round((goalMin / 60) * 10) / 10}h
                 </span>
               </div>
               <Bar pct={goalPct} color={parent?.color || "#8b5cf6"} />
@@ -454,7 +772,11 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
           <p className="label">Atajos</p>
           <p>
             <b className="text-ink">Espacio</b> iniciar / pausar · <b className="text-ink">R</b>{" "}
-            reiniciar
+            reiniciar · <b className="text-ink">F</b> pantalla completa
+          </p>
+          <p className="mt-2">
+            Tocá el número del reloj para cambiar la duración. Poné un descanso en{" "}
+            <b className="text-ink">0</b> y el timer lo saltea.
           </p>
         </div>
       </div>
@@ -481,13 +803,16 @@ export default function Timer({ groups, settings, onSaved, todaySec, weekByGroup
       <KeyBinds
         onSpace={() => (running ? pause() : start())}
         onR={reset}
+        onF={toggleFs}
+        disabled={editing || !!noteFor}
       />
     </div>
   );
 }
 
-function KeyBinds({ onSpace, onR }) {
+function KeyBinds({ onSpace, onR, onF, disabled }) {
   useEffect(() => {
+    if (disabled) return;
     const h = (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
@@ -496,9 +821,10 @@ function KeyBinds({ onSpace, onR }) {
         onSpace();
       }
       if (e.key === "r" || e.key === "R") onR();
+      if (e.key === "f" || e.key === "F") onF();
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [onSpace, onR]);
+  }, [onSpace, onR, onF, disabled]);
   return null;
 }

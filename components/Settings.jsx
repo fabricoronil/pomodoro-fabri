@@ -31,7 +31,7 @@ function Toggle({ on, onChange }) {
   );
 }
 
-function Num({ value, onChange, min = 1, max = 180 }) {
+function Num({ value, onChange, min = 1, max = 600 }) {
   return (
     <input
       type="number"
@@ -81,14 +81,17 @@ export default function Settings({ settings, setSettings, onChange }) {
 
       <div className="card p-5">
         <p className="label">Duraciones</p>
+        <p className="-mt-1 mb-2 text-xs text-muted">
+          También podés cambiarlas tocando el número del reloj en la pestaña Timer.
+        </p>
         <Row title="Enfoque" desc="minutos por pomodoro">
-          <Num value={settings.focusMin} onChange={(v) => set("focusMin", v)} />
+          <Num value={settings.focusMin} onChange={(v) => set("focusMin", v)} min={1} max={600} />
         </Row>
-        <Row title="Descanso corto" desc="minutos">
-          <Num value={settings.shortMin} onChange={(v) => set("shortMin", v)} />
+        <Row title="Descanso corto" desc="minutos · 0 = sin descanso">
+          <Num value={settings.shortMin} onChange={(v) => set("shortMin", v)} min={0} />
         </Row>
-        <Row title="Descanso largo" desc="minutos">
-          <Num value={settings.longMin} onChange={(v) => set("longMin", v)} />
+        <Row title="Descanso largo" desc="minutos · 0 = sin descanso">
+          <Num value={settings.longMin} onChange={(v) => set("longMin", v)} min={0} />
         </Row>
         <Row title="Descanso largo cada" desc="cantidad de pomodoros">
           <Num value={settings.longEvery} onChange={(v) => set("longEvery", v)} min={2} max={12} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar as RBar,
   BarChart,
@@ -38,6 +38,7 @@ export default function Sleep({ onChange }) {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const formRef = useRef(null);
 
   const load = async () => setLogs(await listSleep());
 
@@ -137,6 +138,14 @@ export default function Sleep({ onChange }) {
         </p>
       </div>
 
+      <TodayCard
+        log={byDate[todayKey()]}
+        onLoad={() => {
+          setDateKey(todayKey());
+          formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }}
+      />
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
           label="Promedio 7 días"
@@ -155,7 +164,7 @@ export default function Sleep({ onChange }) {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[340px_minmax(0,1fr)]">
-        <div className="card p-5">
+        <div ref={formRef} className="card p-5">
           <p className="label">Fecha (día que te levantaste)</p>
           <input
             type="date"
@@ -267,6 +276,66 @@ export default function Sleep({ onChange }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function TodayCard({ log, onLoad }) {
+  const hours = log?.hours ? Number(log.hours) : null;
+  const c = colorFor(hours || 0);
+
+  if (!hours) {
+    return (
+      <div className="card flex flex-wrap items-center justify-between gap-4 border-accent/30 bg-accent/[0.06] p-5">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted">
+            Sueño de hoy
+          </p>
+          <p className="mt-1 text-lg font-bold">Todavía no lo cargaste</p>
+          <p className="text-sm text-muted">
+            Anotá a qué hora te acostaste anoche y a qué hora te despertaste.
+          </p>
+        </div>
+        <button onClick={onLoad} className="btn-primary shrink-0 px-5 py-3">
+          Cargar ahora
+        </button>
+      </div>
+    );
+  }
+
+  const verdict =
+    hours >= 7.5
+      ? "Dormiste bien. Buen día para exigirte."
+      : hours >= 6.5
+      ? "Justito. Bajá un cambio si te cuesta concentrarte."
+      : "Dormiste poco. Ojo con encadenar pomodoros largos hoy.";
+
+  return (
+    <div
+      className="card flex flex-wrap items-center justify-between gap-5 p-5"
+      style={{ borderColor: `${c}55`, background: `${c}0f` }}
+    >
+      <div className="flex items-center gap-5">
+        <div className="text-center">
+          <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted">
+            Sueño de hoy
+          </p>
+          <p className="tnum text-4xl font-bold leading-tight" style={{ color: c }}>
+            {hours} h
+          </p>
+        </div>
+        <div className="h-12 w-px bg-line" />
+        <div className="text-sm">
+          <p className="tnum font-semibold">
+            {log.bed_time} → {log.wake_time}
+          </p>
+          <p className="mt-0.5 text-muted">{verdict}</p>
+          {log.note && <p className="mt-1 text-xs text-muted/80">“{log.note}”</p>}
+        </div>
+      </div>
+      <button onClick={onLoad} className="btn-ghost shrink-0">
+        Editar
+      </button>
     </div>
   );
 }
