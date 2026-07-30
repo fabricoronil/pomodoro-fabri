@@ -9,8 +9,6 @@ import {
   ComposedChart,
   Legend,
   Line,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -22,6 +20,7 @@ import {
   eachDayKey,
   fmtDur,
   fromKey,
+  longDate,
   pctDelta,
   pearson,
   periodRange,
@@ -55,42 +54,100 @@ const PERIODS = [
 
 const DOW = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
+// Vistas secundarias: viven detrás del resumen para no ensuciar lo importante.
+const EXTRAS = [
+  { id: "sesiones", label: "Ver sesión por sesión" },
+  { id: "sueno", label: "Sueño vs. estudio" },
+  { id: "comparar", label: "Comparar dos fechas" },
+];
+
+const EXTRA_TITLES = {
+  sesiones: "Sesión por sesión",
+  sueno: "Sueño vs. estudio",
+  comparar: "Comparar dos fechas",
+};
+
+/** Título del bloque principal, en criollo según el período que estés mirando */
+function heroTitle(period, isCurrent) {
+  if (period === "day") return isCurrent ? "Hoy estudiaste" : "Ese día estudiaste";
+  if (period === "week") return isCurrent ? "Esta semana estudiaste" : "Esa semana estudiaste";
+  if (period === "month") return isCurrent ? "Este mes estudiaste" : "Ese mes estudiaste";
+  return isCurrent ? "Este año estudiaste" : "Ese año estudiaste";
+}
+
+const chartTitle = (period) =>
+  period === "day"
+    ? "A qué hora"
+    : period === "week"
+    ? "Qué días"
+    : period === "year"
+    ? "Mes a mes"
+    : "Día a día";
+
+/** Duración grande, con las unidades en chico: 3h 25m */
+function BigDur({ sec }) {
+  const s = Math.max(0, Math.round(sec));
+  let h = Math.floor(s / 3600);
+  let m = Math.round((s % 3600) / 60);
+  if (m === 60) {
+    h += 1;
+    m = 0;
+  }
+  const U = ({ children }) => (
+    <span className="ml-1 mr-2.5 text-2xl font-semibold text-muted">{children}</span>
+  );
+  if (!h && !m)
+    return (
+      <span className="tnum">
+        0<U>m</U>
+      </span>
+    );
+  return (
+    <span className="tnum">
+      {h > 0 && (
+        <>
+          {h}
+          <U>h</U>
+        </>
+      )}
+      {m > 0 && (
+        <>
+          {m}
+          <U>m</U>
+        </>
+      )}
+    </span>
+  );
+}
+
+const hhmm = (iso) =>
+  new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+
 export default function Analytics({ groups, refreshKey, onChange }) {
   useThemeVersion(); // los gráficos leen los colores del tema en cada render
-  const [period, setPeriod] = useState("week");
+  const [period, setPeriod] = useState("day");
   const [anchor, setAnchor] = useState(new Date());
   const [sessions, setSessions] = useState([]);
-  const [prevSessions, setPrevSessions] = useState([]);
   const [sleep, setSleep] = useState([]);
-  const [drill, setDrill] = useState(null); // id de grupo raíz
   const [tab, setTab] = useState("resumen");
   const [loading, setLoading] = useState(true);
 
   const range = useMemo(() => periodRange(period, anchor), [period, anchor]);
-  const prevRange = useMemo(
-    () => periodRange(period, shiftAnchor(period, anchor, -1)),
-    [period, anchor]
-  );
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([
-      listSessions(range.startKey, range.endKey),
-      listSessions(prevRange.startKey, prevRange.endKey),
-      listSleep(),
-    ])
-      .then(([a, b, c]) => {
+    Promise.all([listSessions(range.startKey, range.endKey), listSleep()])
+      .then(([a, b]) => {
         if (!alive) return;
         setSessions(a);
-        setPrevSessions(b);
-        setSleep(c);
+        setSleep(b);
       })
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
-  }, [range.startKey, range.endKey, prevRange.startKey, prevRange.endKey, refreshKey]);
+  }, [range.startKey, range.endKey, refreshKey]);
 
   const gmap = useMemo(() => Object.fromEntries(groups.map((g) => [g.id, g])), [groups]);
   const rootOf = (id) => {
@@ -98,7 +155,6 @@ export default function Analytics({ groups, refreshKey, onChange }) {
     if (!g) return null;
     return g.parent_id ? gmap[g.parent_id] || g : g;
   };
-  const nameOf = (id) => gmap[id]?.name || "Sin grupo";
   const fullName = (id) => {
     const g = gmap[id];
     if (!g) return "Sin grupo";
@@ -106,58 +162,124 @@ export default function Analytics({ groups, refreshKey, onChange }) {
   };
 
   const totalSec = sessions.reduce((a, s) => a + s.duration_seconds, 0);
-  const prevSec = prevSessions.reduce((a, s) => a + s.duration_seconds, 0);
 
-  // ------- por grupo raíz -------
-  const byRoot = useMemo(() => {
-    const m = {};
+  const isCurrent = useMemo(
+    () => periodRange(period, new Date()).startKey === range.startKey,
+    [period, range]
+  );
+
+  // ---- en qué le metiste tiempo: grupo raíz + sus subgrupos, todo junto ----
+  const breakdown = useMemo(() => {
+    const roots = {};
     sessions.forEach((s) => {
-      const r = rootOf(s.group_id);
-      const id = r?.id || "none";
-      if (!m[id]) m[id] = { id, name: r?.name || "Sin grupo", color: r?.color || themeColor("surface3"), sec: 0, count: 0 };
-      m[id].sec += s.duration_seconds;
-      m[id].count++;
+      const g = gmap[s.group_id];
+      const root = rootOf(s.group_id);
+      const rid = root?.id || "none";
+      if (!roots[rid])
+        roots[rid] = {
+          id: rid,
+          name: root?.name || "Sin grupo",
+          color: root?.color || themeColor("surface3"),
+          sec: 0,
+          count: 0,
+          kids: {},
+        };
+      const R = roots[rid];
+      R.sec += s.duration_seconds;
+      R.count++;
+
+      const kid = g?.parent_id ? g.id : "_general";
+      if (!R.kids[kid])
+        R.kids[kid] = {
+          id: kid,
+          name: g?.parent_id ? g.name : "General",
+          color: g?.color || R.color,
+          sec: 0,
+          count: 0,
+        };
+      R.kids[kid].sec += s.duration_seconds;
+      R.kids[kid].count++;
     });
-    return Object.values(m).sort((a, b) => b.sec - a.sec);
+
+    return Object.values(roots)
+      .map((r) => ({
+        ...r,
+        kids: Object.values(r.kids).sort((a, b) => b.sec - a.sec),
+      }))
+      .sort((a, b) => b.sec - a.sec);
   }, [sessions, gmap]);
 
-  const bySub = useMemo(() => {
-    if (!drill) return [];
-    const m = {};
-    sessions.forEach((s) => {
-      const r = rootOf(s.group_id);
-      if (r?.id !== drill) return;
-      const g = gmap[s.group_id];
-      const id = s.group_id;
-      const label = g?.parent_id ? g.name : "General";
-      if (!m[id]) m[id] = { id, name: label, color: g?.color || themeColor("surface3"), sec: 0, count: 0 };
-      m[id].sec += s.duration_seconds;
-      m[id].count++;
-    });
-    return Object.values(m).sort((a, b) => b.sec - a.sec);
-  }, [sessions, drill, gmap]);
+  // ------------------------- datos sueltos del período -------------------------
+  const facts = useMemo(() => {
+    if (!sessions.length) return [];
+    const out = [{ label: "Sesiones", value: String(sessions.length) }];
 
-  // ------- serie temporal -------
-  const series = useMemo(() => {
     if (period === "day") {
-      const hours = Array.from({ length: 24 }, (_, h) => ({ label: `${h}h`, sec: 0 }));
-      sessions.forEach((s) => {
-        const h = new Date(s.started_at).getHours();
-        hours[h].sec += s.duration_seconds;
+      const longest = Math.max(...sessions.map((s) => s.duration_seconds));
+      const times = sessions.map((s) => new Date(s.started_at)).sort((a, b) => a - b);
+      out.push({ label: "La más larga", value: fmtDur(longest) });
+      out.push({
+        label: "Entre",
+        value: `${hhmm(times[0])} y ${hhmm(times[times.length - 1])}`,
       });
-      return hours.map((h) => ({ ...h, horas: toHours(h.sec) }));
+      return out;
     }
-    if (period === "year") {
-      const months = Array.from({ length: 12 }, (_, m) => ({
-        label: new Date(2020, m, 1).toLocaleDateString("es-AR", { month: "short" }),
+
+    const perDay = {};
+    sessions.forEach((s) => {
+      perDay[s.local_date] = (perDay[s.local_date] || 0) + s.duration_seconds;
+    });
+    const days = Object.entries(perDay).sort((a, b) => b[1] - a[1]);
+    const totalDays = eachDayKey(range.startKey, range.endKey).length;
+
+    out.push({
+      label: "Promedio por día activo",
+      value: fmtDur(totalSec / days.length),
+    });
+    out.push({ label: "Días activos", value: `${days.length} de ${totalDays}` });
+    if (days.length > 1)
+      out.push({
+        label: "Tu mejor día",
+        value: `${fmtDur(days[0][1])} · ${shortDate(fromKey(days[0][0]))}`,
+      });
+    return out;
+  }, [sessions, period, range, totalSec]);
+
+  // ----------------------------- serie temporal -----------------------------
+  const series = useMemo(() => {
+    const tk = todayKey();
+
+    if (period === "day") {
+      const hours = Array.from({ length: 24 }, (_, h) => ({
+        label: `${h}h`,
+        hour: h,
         sec: 0,
       }));
       sessions.forEach((s) => {
-        const m = fromKey(s.local_date).getMonth();
-        months[m].sec += s.duration_seconds;
+        hours[new Date(s.started_at).getHours()].sec += s.duration_seconds;
+      });
+      const active = hours.filter((h) => h.sec > 0);
+      if (!active.length) return [];
+      // recorta el gráfico a las horas en las que pasó algo (+1 de aire a cada lado)
+      const lo = Math.max(0, Math.min(...active.map((h) => h.hour)) - 1);
+      const hi = Math.min(23, Math.max(...active.map((h) => h.hour)) + 1);
+      return hours.slice(lo, hi + 1).map((h) => ({ ...h, horas: toHours(h.sec) }));
+    }
+
+    if (period === "year") {
+      const nowM = new Date().getMonth();
+      const thisYear = new Date().getFullYear() === fromKey(range.startKey).getFullYear();
+      const months = Array.from({ length: 12 }, (_, m) => ({
+        label: new Date(2020, m, 1).toLocaleDateString("es-AR", { month: "short" }),
+        sec: 0,
+        now: thisYear && m === nowM,
+      }));
+      sessions.forEach((s) => {
+        months[fromKey(s.local_date).getMonth()].sec += s.duration_seconds;
       });
       return months.map((m) => ({ ...m, horas: toHours(m.sec) }));
     }
+
     const keys = eachDayKey(range.startKey, range.endKey);
     const m = Object.fromEntries(keys.map((k) => [k, 0]));
     sessions.forEach((s) => {
@@ -167,273 +289,251 @@ export default function Analytics({ groups, refreshKey, onChange }) {
       const d = fromKey(k);
       return {
         key: k,
-        label:
-          period === "week"
-            ? DOW[(d.getDay() + 6) % 7]
-            : d.getDate().toString(),
+        label: period === "week" ? DOW[(d.getDay() + 6) % 7] : String(d.getDate()),
         sec: m[k],
         horas: toHours(m[k]),
+        now: k === tk,
       };
     });
   }, [sessions, period, range]);
 
-  const activeDays = useMemo(
-    () => new Set(sessions.map((s) => s.local_date)).size,
-    [sessions]
-  );
-  const bestDay = useMemo(() => {
-    const m = {};
-    sessions.forEach((s) => (m[s.local_date] = (m[s.local_date] || 0) + s.duration_seconds));
-    const e = Object.entries(m).sort((a, b) => b[1] - a[1])[0];
-    return e ? { key: e[0], sec: e[1] } : null;
-  }, [sessions]);
-
-  const daysInRange = eachDayKey(range.startKey, range.endKey).length;
-  const avgPerDay = daysInRange ? totalSec / daysInRange : 0;
-
-  const isCurrent = useMemo(() => {
-    const now = periodRange(period, new Date());
-    return now.startKey === range.startKey;
-  }, [period, range]);
+  const hasNow = series.some((d) => d.now);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      {/* ---------- cabecera ---------- */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Segmented value={period} onChange={setPeriod} options={PERIODS} />
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setAnchor(shiftAnchor(period, anchor, -1))}
-            className="btn-ghost px-3 py-2"
-          >
-            ‹
+    <div className="mx-auto max-w-5xl space-y-5">
+      {/* ---------- vista secundaria: volver ---------- */}
+      {tab !== "resumen" && (
+        <div className="flex items-center justify-between gap-3">
+          <button onClick={() => setTab("resumen")} className="btn-ghost px-3 py-2 text-sm">
+            ‹ Volver al resumen
           </button>
-          <span className="min-w-[190px] text-center text-sm font-semibold">{range.label}</span>
-          <button
-            onClick={() => setAnchor(shiftAnchor(period, anchor, 1))}
-            disabled={isCurrent}
-            className="btn-ghost px-3 py-2"
-          >
-            ›
-          </button>
-          {!isCurrent && (
-            <button onClick={() => setAnchor(new Date())} className="btn-quiet px-3 py-2 text-xs">
-              Hoy
-            </button>
-          )}
+          <span className="text-sm font-semibold">{EXTRA_TITLES[tab]}</span>
         </div>
-      </div>
+      )}
 
-      <Segmented
-        value={tab}
-        onChange={setTab}
-        options={[
-          { value: "resumen", label: "Resumen" },
-          { value: "comparar", label: "Comparar fechas" },
-          { value: "sueno", label: "Sueño vs estudio" },
-          { value: "sesiones", label: "Sesiones" },
-        ]}
-      />
+      {/* ---------- cabecera: período + navegación ---------- */}
+      {(tab === "resumen" || tab === "sesiones") && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Segmented value={period} onChange={setPeriod} options={PERIODS} />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setAnchor(shiftAnchor(period, anchor, -1))}
+              className="btn-ghost px-3 py-2"
+              aria-label="Anterior"
+            >
+              ‹
+            </button>
+            <span className="min-w-[190px] text-center text-sm font-semibold">
+              {period === "day" && isCurrent ? "Hoy" : range.label}
+            </span>
+            <button
+              onClick={() => setAnchor(shiftAnchor(period, anchor, 1))}
+              disabled={isCurrent}
+              className="btn-ghost px-3 py-2"
+              aria-label="Siguiente"
+            >
+              ›
+            </button>
+            {!isCurrent && (
+              <button onClick={() => setAnchor(new Date())} className="btn-quiet px-3 py-2 text-xs">
+                Hoy
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {tab === "resumen" && (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat
-              label="Tiempo total"
-              value={fmtDur(totalSec)}
-              sub={`vs. ${fmtDur(prevSec)} el período anterior`}
-              right={<Delta value={pctDelta(totalSec, prevSec)} />}
-            />
-            <Stat
-              label="Sesiones"
-              value={sessions.length}
-              sub={
-                sessions.length
-                  ? `promedio ${fmtDur(totalSec / sessions.length)} c/u`
-                  : "sin sesiones"
-              }
-              right={<Delta value={pctDelta(sessions.length, prevSessions.length)} />}
-            />
-            <Stat
-              label="Promedio por día"
-              value={fmtDur(avgPerDay)}
-              sub={`${activeDays} de ${daysInRange} días activos`}
-            />
-            <Stat
-              label="Mejor día"
-              value={bestDay ? fmtDur(bestDay.sec) : "—"}
-              sub={bestDay ? shortDate(fromKey(bestDay.key)) : ""}
-              accent={themeColor("rest")}
-            />
+          {/* ---------- 1. cuánto tiempo le metiste ---------- */}
+          <div className="card p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted">
+              {heroTitle(period, isCurrent)}
+            </p>
+            <p
+              className={`mt-1 text-5xl font-bold leading-none transition-opacity sm:text-6xl ${
+                loading ? "opacity-30" : ""
+              }`}
+            >
+              <BigDur sec={totalSec} />
+            </p>
+            {facts.length > 0 && (
+              <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3 border-t border-line/60 pt-4">
+                {facts.map((f) => (
+                  <div key={f.label}>
+                    <p className="text-[11px] uppercase tracking-[.1em] text-muted">{f.label}</p>
+                    <p className="tnum mt-0.5 text-sm font-semibold">{f.value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
+          {/* ---------- 2. en qué se fue ese tiempo ---------- */}
           <div className="card p-5">
-            <p className="label">
-              {period === "day"
-                ? "Distribución por hora"
-                : period === "year"
-                ? "Por mes"
-                : "Por día"}
-            </p>
-            <div className="h-[280px]">
-              {totalSec === 0 && !loading ? (
-                <Empty>No hay sesiones en este período.</Empty>
-              ) : (
+            <div className="mb-4 flex items-baseline justify-between gap-3">
+              <p className="label mb-0">En qué le metiste tiempo</p>
+              {breakdown.length > 1 && (
+                <span className="text-xs text-muted">{breakdown.length} grupos</span>
+              )}
+            </div>
+
+            {loading ? (
+              <Empty>Cargando…</Empty>
+            ) : breakdown.length === 0 ? (
+              <Empty>
+                {period === "day" && isCurrent
+                  ? "Todavía no registraste tiempo hoy. Arrancá un pomodoro y aparece acá."
+                  : "No hay sesiones en este período."}
+              </Empty>
+            ) : (
+              <>
+                {/* barra de reparto: todo el período de un vistazo */}
+                {breakdown.length > 1 && (
+                  <div className="mb-5 flex h-2.5 w-full gap-[2px] overflow-hidden rounded-full">
+                    {breakdown.map((g) => (
+                      <div
+                        key={g.id}
+                        title={`${g.name} · ${fmtDur(g.sec)}`}
+                        style={{
+                          width: `${(g.sec / totalSec) * 100}%`,
+                          background: g.color,
+                        }}
+                        className="rounded-full"
+                      />
+                    ))}
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  {breakdown.map((g) => (
+                    <GroupRow key={g.id} group={g} total={totalSec} />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* ---------- 3. cuándo ---------- */}
+          {series.length > 0 && totalSec > 0 && (
+            <div className="card p-5">
+              <div className="mb-1 flex items-baseline justify-between gap-3">
+                <p className="label mb-0">{chartTitle(period)}</p>
+                {hasNow && (
+                  <span className="flex items-center gap-1.5 text-[11px] text-muted">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ background: themeColor("accent2") }}
+                    />
+                    {period === "year" ? "este mes" : "hoy"}
+                  </span>
+                )}
+              </div>
+              <div className="h-[240px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={series} margin={{ top: 8, right: 6, left: -22, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                    <XAxis
+                      dataKey="label"
+                      tickLine={false}
+                      axisLine={false}
+                      interval="preserveStartEnd"
+                    />
                     <YAxis tickLine={false} axisLine={false} unit="h" />
                     <Tooltip
                       cursor={{ fill: themeColorA("ink", 0.05) }}
                       contentStyle={tooltipStyle}
                       formatter={(v, n, p) => [fmtDur(p.payload.sec), "Estudio"]}
                     />
-                    <RBar dataKey="horas" radius={[6, 6, 0, 0]} maxBarSize={40} fill={themeColor("accent")} />
+                    <RBar dataKey="horas" radius={[4, 4, 0, 0]} maxBarSize={36}>
+                      {series.map((d, i) => (
+                        <Cell
+                          key={i}
+                          fill={themeColor(d.now ? "accent2" : "accent")}
+                        />
+                      ))}
+                    </RBar>
                   </BarChart>
                 </ResponsiveContainer>
-              )}
-            </div>
-          </div>
-
-          <div className="grid gap-5 lg:grid-cols-2">
-            <div className="card p-5">
-              <p className="label">Reparto por grupo</p>
-              {byRoot.length === 0 ? (
-                <Empty>Sin datos.</Empty>
-              ) : (
-                <>
-                  <div className="h-[220px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={byRoot}
-                          dataKey="sec"
-                          nameKey="name"
-                          innerRadius={58}
-                          outerRadius={88}
-                          paddingAngle={3}
-                          stroke="none"
-                        >
-                          {byRoot.map((d) => (
-                            <Cell key={d.id} fill={d.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtDur(v)} />
-                        <Legend
-                          verticalAlign="bottom"
-                          formatter={(v) => <span style={legendStyle()}>{v}</span>}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="mt-3 space-y-3">
-                    {byRoot.map((g) => (
-                      <button
-                        key={g.id}
-                        onClick={() => setDrill(drill === g.id ? null : g.id)}
-                        className="block w-full text-left"
-                      >
-                        <div className="mb-1 flex items-baseline justify-between text-sm">
-                          <span className="font-medium">
-                            {g.name}
-                            <span className="ml-1.5 text-xs text-muted">({g.count})</span>
-                          </span>
-                          <span className="tnum text-muted">
-                            {fmtDur(g.sec)} · {Math.round((g.sec / totalSec) * 100)}%
-                          </span>
-                        </div>
-                        <ProgressBar pct={(g.sec / totalSec) * 100} color={g.color} height={6} />
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="card p-5">
-              <div className="flex items-center justify-between">
-                <p className="label mb-0">
-                  {drill ? `Subgrupos · ${nameOf(drill)}` : "Subgrupos"}
-                </p>
-                {drill && (
-                  <button onClick={() => setDrill(null)} className="btn-quiet px-2 py-1 text-xs">
-                    limpiar
-                  </button>
-                )}
               </div>
-              {!drill ? (
-                <Empty>Tocá un grupo de la izquierda para ver el detalle.</Empty>
-              ) : bySub.length === 0 ? (
-                <Empty>Sin sesiones de este grupo.</Empty>
-              ) : (
-                <div className="mt-4 space-y-3">
-                  {bySub.map((s) => {
-                    const tot = bySub.reduce((a, b) => a + b.sec, 0);
-                    return (
-                      <div key={s.id}>
-                        <div className="mb-1 flex items-baseline justify-between text-sm">
-                          <span className="font-medium">{s.name}</span>
-                          <span className="tnum text-muted">
-                            {fmtDur(s.sec)} · {Math.round((s.sec / tot) * 100)}%
-                          </span>
-                        </div>
-                        <ProgressBar pct={(s.sec / tot) * 100} color={s.color} height={6} />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
-          </div>
+          )}
 
           <GoalsPanel groups={groups} />
+
+          {/* ---------- 4. lo demás, fuera del camino ---------- */}
+          <div className="pt-3 text-center">
+            <p className="mb-2 text-xs text-muted">¿Querés mirar algo más?</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {EXTRAS.map((e) => (
+                <button key={e.id} onClick={() => setTab(e.id)} className="chip">
+                  {e.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </>
       )}
 
-      {tab === "comparar" && <Compare groups={groups} refreshKey={refreshKey} />}
+      {tab === "sesiones" && (
+        <SessionsList
+          sessions={sessions}
+          period={period}
+          rootOf={rootOf}
+          fullName={fullName}
+          onChange={onChange}
+        />
+      )}
 
       {tab === "sueno" && <SleepVsStudy sleep={sleep} refreshKey={refreshKey} />}
 
-      {tab === "sesiones" && (
-        <div className="card p-5">
-          <p className="label">Sesiones del período ({sessions.length})</p>
-          {sessions.length === 0 ? (
-            <Empty>No hay sesiones.</Empty>
-          ) : (
-            <div className="divide-y divide-line/60">
-              {sessions.map((s) => (
-                <div key={s.id} className="flex items-start gap-3 py-3 text-sm">
-                  <span
-                    className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ background: rootOf(s.group_id)?.color || themeColor("surface3") }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium">{fullName(s.group_id)}</p>
-                    <p className="text-xs text-muted">
-                      {shortDate(fromKey(s.local_date))} ·{" "}
-                      {new Date(s.started_at).toLocaleTimeString("es-AR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                      {s.note ? ` · ${s.note}` : ""}
-                    </p>
-                  </div>
-                  <span className="tnum shrink-0 font-semibold">{fmtDur(s.duration_seconds)}</span>
-                  <button
-                    onClick={async () => {
-                      if (!confirm("¿Borrar esta sesión?")) return;
-                      await deleteSession(s.id);
-                      onChange?.();
-                    }}
-                    className="btn-quiet shrink-0 px-2 py-0.5 text-xs hover:text-focus"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+      {tab === "comparar" && <Compare groups={groups} refreshKey={refreshKey} />}
+    </div>
+  );
+}
+
+/* ------------------------------------------------ FILA DE GRUPO + SUBGRUPOS */
+
+function GroupRow({ group, total }) {
+  const pct = total ? (group.sec / total) * 100 : 0;
+  // "General" solo cuando es el único hijo: no aporta nada desglosarlo
+  const kids =
+    group.kids.length === 1 && group.kids[0].id === "_general" ? [] : group.kids;
+
+  return (
+    <div className="rounded-xl border border-line/60 bg-surface2/30 p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="flex min-w-0 items-baseline gap-2 font-semibold">
+          <span
+            className="h-2.5 w-2.5 shrink-0 translate-y-[-1px] rounded-full"
+            style={{ background: group.color }}
+          />
+          <span className="truncate">{group.name}</span>
+        </span>
+        <span className="tnum shrink-0 font-bold">{fmtDur(group.sec)}</span>
+      </div>
+
+      <div className="mt-2">
+        <ProgressBar pct={pct} color={group.color} height={6} />
+      </div>
+      <p className="mt-1.5 text-xs text-muted">
+        {Math.round(pct)}% de tu tiempo · {group.count}{" "}
+        {group.count === 1 ? "sesión" : "sesiones"}
+      </p>
+
+      {kids.length > 0 && (
+        <div className="mt-3.5 space-y-2 border-t border-line/50 pt-3">
+          {kids.map((k) => (
+            <div key={k.id} className="flex items-center gap-3 text-sm">
+              <span className="min-w-0 flex-1 truncate text-muted">{k.name}</span>
+              <div className="hidden h-1.5 w-28 shrink-0 sm:block">
+                <ProgressBar pct={(k.sec / group.sec) * 100} color={k.color} height={6} />
+              </div>
+              <span className="tnum w-16 shrink-0 text-right font-semibold">
+                {fmtDur(k.sec)}
+              </span>
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>
@@ -486,6 +586,78 @@ function GoalsPanel({ groups }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- SESIONES */
+
+function SessionsList({ sessions, period, rootOf, fullName, onChange }) {
+  const byDay = useMemo(() => {
+    const m = {};
+    sessions.forEach((s) => {
+      if (!m[s.local_date]) m[s.local_date] = [];
+      m[s.local_date].push(s);
+    });
+    return Object.entries(m).sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [sessions]);
+
+  if (!sessions.length)
+    return (
+      <div className="card p-5">
+        <p className="label">Sesiones</p>
+        <Empty>No hay sesiones en este período.</Empty>
+      </div>
+    );
+
+  return (
+    <div className="card p-5">
+      <p className="label">Sesiones ({sessions.length})</p>
+      <div className="space-y-5">
+        {byDay.map(([key, list]) => (
+          <div key={key}>
+            {period !== "day" && (
+              <div className="mb-1 flex items-baseline justify-between border-b border-line/60 pb-1.5">
+                <span className="text-xs font-semibold">{longDate(fromKey(key))}</span>
+                <span className="tnum text-xs text-muted">
+                  {fmtDur(list.reduce((a, s) => a + s.duration_seconds, 0))}
+                </span>
+              </div>
+            )}
+            <div className="divide-y divide-line/50">
+              {list.map((s) => (
+                <div key={s.id} className="flex items-start gap-3 py-3 text-sm">
+                  <span
+                    className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: rootOf(s.group_id)?.color || themeColor("surface3") }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{fullName(s.group_id)}</p>
+                    <p className="text-xs text-muted">
+                      {hhmm(s.started_at)}
+                      {s.note ? ` · ${s.note}` : ""}
+                    </p>
+                  </div>
+                  <span className="tnum shrink-0 font-semibold">
+                    {fmtDur(s.duration_seconds)}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      if (!confirm("¿Borrar esta sesión?")) return;
+                      await deleteSession(s.id);
+                      onChange?.();
+                    }}
+                    className="btn-quiet shrink-0 px-2 py-0.5 text-xs hover:text-focus"
+                    aria-label="Borrar sesión"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -661,8 +833,8 @@ function Compare({ groups, refreshKey }) {
                   formatter={(v, n, p) => [fmtDur(n === "A" ? p.payload.secA : p.payload.secB), n === "A" ? "Período A" : "Período B"]}
                 />
                 <Legend formatter={(v) => <span style={legendStyle()}>{v === "A" ? "Período A" : "Período B"}</span>} />
-                <RBar dataKey="A" fill={themeColor("accent")} radius={[6, 6, 0, 0]} maxBarSize={34} />
-                <RBar dataKey="B" fill={themeColor("accent2")} radius={[6, 6, 0, 0]} maxBarSize={34} />
+                <RBar dataKey="A" fill={themeColor("accent")} radius={[4, 4, 0, 0]} maxBarSize={34} />
+                <RBar dataKey="B" fill={themeColor("accent2")} radius={[4, 4, 0, 0]} maxBarSize={34} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -799,12 +971,12 @@ function SleepVsStudy({ sleep, refreshKey }) {
                     </span>
                   )}
                 />
-                <RBar dataKey="estudio" fill={themeColor("accent")} radius={[6, 6, 0, 0]} maxBarSize={26} />
+                <RBar dataKey="estudio" fill={themeColor("accent")} radius={[4, 4, 0, 0]} maxBarSize={26} />
                 <Line
                   type="monotone"
                   dataKey="sueno"
                   stroke={themeColor("accent2")}
-                  strokeWidth={2.5}
+                  strokeWidth={2}
                   dot={{ r: 2.5, fill: themeColor("accent2") }}
                   connectNulls
                 />
