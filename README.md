@@ -7,6 +7,8 @@ Next.js 14 + Tailwind + Supabase. Pensado para hostear en Vercel y abrir desde c
 
 ## Qué hace
 
+- **Cuenta propia**: registro e inicio de sesión con email y contraseña. Cada cuenta ve solo sus datos.
+- **Timer que no se corta**: el pomodoro vive en tu cuenta, no en el navegador. Lo arrancás en la compu, abrís el celular y sigue exactamente igual. Podés cerrar la web: al volver, si el bloque ya había terminado, la sesión queda guardada sola. **Solo se detiene si lo cancelás.**
 - **Timer**: enfoque / descanso corto / descanso largo, configurables. Sigue corriendo si refrescás la pestaña.
 - **Grupos y subgrupos**: ya vienen cargados *Facultad* (Física II, Paradigma y Lenguaje de Programación II, Portugués A, Sistema de Representación, Sistemas Operativos), *Inglés* y *Personal*. Podés agregar, editar y borrar los que quieras.
 - **Notas por sesión**: al terminar un pomodoro te pregunta qué hiciste.
@@ -26,12 +28,29 @@ Next.js 14 + Tailwind + Supabase. Pensado para hostear en Vercel y abrir desde c
 1. Entrá a <https://supabase.com>, creá una cuenta y un proyecto nuevo (plan gratis).
 2. En el menú lateral: **SQL Editor → New query**.
 3. Copiá y pegá **todo** el contenido de `supabase-schema.sql` y apretá **Run**.
-4. Andá a **Settings → API** y copiá dos cosas:
+   (Se puede correr de nuevo sin romper nada: sirve para una base nueva y para actualizar una vieja.)
+4. **Authentication → Providers → Email**: dejalo activado.
+   Para uso personal conviene **desactivar "Confirm email"**, así entrás sin pasar por el correo.
+5. **Database → Replication** (o *Realtime*): asegurate de que la tabla `active_timer` esté publicada.
+   El script ya la agrega; esto es solo para confirmarlo. Si no lo está, la app igual sincroniza
+   (revisa el estado al volver a la pestaña y cada 20 segundos), pero tarda un poco más.
+6. Andá a **Settings → API** y copiá dos cosas:
    - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
    - **anon / public key** → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
-> La app es de un solo usuario (vos), así que las políticas de RLS del script son abiertas para la clave anon.
-> No pongas datos sensibles ahí. Si algún día querés login, hay que reemplazar esas políticas por unas basadas en `auth.uid()`.
+> Cada fila lleva `user_id` y las políticas de RLS son `user_id = auth.uid()`: nadie ve los datos de otro,
+> aunque tenga la clave anon.
+
+### Si ya tenías datos de la versión sin cuentas
+
+Con RLS por usuario, las filas viejas (con `user_id` vacío) quedan invisibles hasta que las adoptes:
+
+1. Registrate en la app.
+2. Copiá tu id en **Authentication → Users → (tu usuario)**.
+3. En el SQL Editor corré las tres líneas comentadas al final de `supabase-schema.sql` con ese id.
+
+Si en cambio venías usando la app en **modo local** (sin Supabase), entrá con tu cuenta y andá a
+**Ajustes → Datos**: aparece el botón *"Subirlos a mi cuenta"* con lo que había en ese navegador.
 
 ---
 
@@ -45,7 +64,10 @@ npm run dev
 
 Abrí <http://localhost:3000>.
 
-> Si no configurás Supabase, la app igual funciona: guarda todo en el navegador (localStorage).
+La primera vez te va a pedir **crear una cuenta**. Después queda la sesión iniciada en ese dispositivo.
+
+> Si no configurás Supabase, la app igual funciona sin cuentas: guarda todo en el navegador
+> (localStorage) y el timer sobrevive a los refrescos, pero no se comparte entre dispositivos.
 > En **Ajustes** vas a ver un cartel que te dice en qué modo estás.
 
 ---
@@ -94,7 +116,8 @@ app/
   globals.css       variables del tema, fondos y clases base
 components/
   Welcome.jsx       animación de entrada "Bienvenido Fabri"
-  Timer.jsx         pomodoro, selección de grupo, notas
+  Auth.jsx          registro / inicio de sesión
+  Timer.jsx         pomodoro sincronizado, selección de grupo, notas
   Analytics.jsx     resumen, comparar fechas, sueño vs estudio, sesiones
   Sleep.jsx         registro y gráficos de sueño
   GroupsManager.jsx alta/edición de grupos, subgrupos y metas
@@ -104,12 +127,27 @@ components/
 lib/
   db.js             capa de datos (Supabase o localStorage)
   supabase.js       cliente
+  auth.jsx          sesión de usuario (registro, login, logout)
+  timerSync.js      el pomodoro en curso: nube + copia local
   utils.js          fechas, formatos, correlación
   theme.js          presets, derivación de paleta y aplicación del tema
 supabase-schema.sql esquema de la base
 ```
 
+## Cómo hace para no cortarse
+
+Mientras corre, el timer **no guarda "segundos restantes"**: guarda en la base el instante en que
+termina (`ends_at`). Cualquier dispositivo que abra la app mira el reloj y resta, así que todos ven
+el mismo número sin hablar entre ellos. Si el bloque vence con la web cerrada, el primero que vuelve
+lo detecta, registra la sesión con la hora real en la que terminó y pasa al descanso. Cuando hay
+varios dispositivos abiertos, el cierre se reclama con un update condicional: gana uno solo y la
+sesión nunca se guarda dos veces.
+
+Lo único que no puede pasar con la web cerrada es el **sonido y la notificación** del final: para eso
+el navegador necesita tener la página abierta (aunque sea en otra pestaña). El tiempo y la sesión no
+se pierden igual.
+
 ## Atajos
 
 - **Espacio**: iniciar / pausar
-- **R**: reiniciar el bloque actual
+- **R**: cancelar el bloque actual

@@ -1,0 +1,127 @@
+"use client";
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { supabase, isSupabaseConfigured } from "./supabase";
+import { setCurrentUserId } from "./db";
+
+/**
+ * Sesión de usuario sobre Supabase Auth (email + contraseña).
+ *
+ * Si no hay Supabase configurado, la app sigue funcionando en "modo local"
+ * (todo en este navegador, sin cuentas): needsAuth queda en false.
+ */
+
+const AuthCtx = createContext({
+  user: null,
+  loading: true,
+  needsAuth: false,
+});
+
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(isSupabaseConfigured);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setCurrentUserId(null);
+      setLoading(false);
+      return;
+    }
+
+    let alive = true;
+
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!alive) return;
+        const u = data.session?.user ?? null;
+        setCurrentUserId(u?.id ?? null);
+        setUser(u);
+        setLoading(false);
+      })
+      .catch(() => alive && setLoading(false));
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      const u = session?.user ?? null;
+      setCurrentUserId(u?.id ?? null);
+      setUser(u);
+      setLoading(false);
+    });
+
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  const value = useMemo(
+    () => ({ user, loading, needsAuth: isSupabaseConfigured && !user }),
+    [user, loading]
+  );
+
+  return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
+}
+
+export const useAuth = () => useContext(AuthCtx);
+
+// ------------------------------------------------------------- acciones
+
+const ERRORS = {
+  "Invalid login credentials": "Email o contraseña incorrectos.",
+  "Email not confirmed": "Confirmá tu email antes de entrar (mirá tu casilla).",
+  "User already registered": "Ese email ya tiene una cuenta. Iniciá sesión.",
+  "Password should be at least 6 characters":
+    "La contraseña necesita al menos 6 caracteres.",
+  "Unable to validate email address: invalid format": "El email no parece válido.",
+  "Signups not allowed for this instance":
+    "El registro está desactivado en Supabase (Authentication → Providers → Email).",
+  "For security purposes, you can only request this after 60 seconds":
+    "Esperá un minuto antes de volver a intentar.",
+};
+
+export function friendlyError(e) {
+  const msg = e?.message || String(e || "");
+  return ERRORS[msg] || msg || "Algo salió mal.";
+}
+
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.trim(),
+    password,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/** Devuelve { needsConfirmation: true } si Supabase pide confirmar el mail */
+export async function signUp(email, password) {
+  const { data, error } = await supabase.auth.signUp({
+    email: email.trim(),
+    password,
+  });
+  if (error) throw error;
+  return { needsConfirmation: !data.session };
+}
+
+export async function signOut() {
+  await supabase.auth.signOut();
+}
+
+export async function sendPasswordReset(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+    redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+  });
+  if (error) throw error;
+}
+
+/** Cambia la contraseña del usuario logueado (útil tras el link de reset) */
+export async function updatePassword(password) {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+}
+
+export function useSignOut() {
+  return useCallback(async () => {
+    if (isSupabaseConfigured) await signOut();
+  }, []);
+}

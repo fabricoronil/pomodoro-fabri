@@ -2,11 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSession, updateSession } from "@/lib/db";
-import { fmtClock, fmtDur, todayKey } from "@/lib/utils";
+import { fmtClock, fmtDur, toKey, todayKey } from "@/lib/utils";
 import { readableOn, themeColor, useThemeVersion } from "@/lib/theme";
+import {
+  EMPTY_TIMER,
+  claimExpired,
+  deviceId,
+  fetchTimer,
+  normalize,
+  pushTimer,
+  readMirror,
+  subscribeTimer,
+  writeMirror,
+} from "@/lib/timerSync";
 import { Modal, Bar } from "./ui";
-
-const TIMER_KEY = "pf.timer";
 
 const MODES = {
   focus: { label: "Enfoque", token: "focus", short: "Enfoque" },
@@ -19,6 +28,11 @@ const PRESETS = {
   short: [0, 3, 5, 10, 15],
   long: [0, 10, 15, 20, 30, 45],
 };
+
+/** Un bloque que venció hace más de esto se cierra en silencio (sin auto-start) */
+const STALE_SEC = 90;
+
+const iso = (ms) => new Date(ms).toISOString();
 
 function beep(volume = 0.5, times = 3) {
   try {
@@ -63,37 +77,36 @@ export default function Timer({
   onSaved,
   todaySec,
   weekByGroup,
+  userId = null,
 }) {
   const parents = useMemo(() => groups.filter((g) => !g.parent_id && !g.archived), [groups]);
 
-  const [mode, setMode] = useState("focus");
-  const [running, setRunning] = useState(false);
-  const [endAt, setEndAt] = useState(null);
-  const [remaining, setRemaining] = useState(settings.focusMin * 60);
-  const [startedAt, setStartedAt] = useState(null);
-  const [cycle, setCycle] = useState(0);
-  const [groupId, setGroupId] = useState("");
-  const [subId, setSubId] = useState("");
+  // ---- estado sincronizado (la fila active_timer) ----
+  const [t, setT] = useState(EMPTY_TIMER);
+  const tRef = useRef(t);
+  const [hydrated, setHydrated] = useState(false);
+  const [syncError, setSyncError] = useState("");
+
+  // ---- reloj de pared: todo lo que se ve se deriva de acá ----
+  const [now, setNow] = useState(() => Date.now());
+
+  // ---- UI ----
   const [noteFor, setNoteFor] = useState(null);
   const [note, setNote] = useState("");
   const [flash, setFlash] = useState("");
-
-  // modo libre (cuenta para arriba)
-  const [freeMode, setFreeMode] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [runStart, setRunStart] = useState(null);
-
-  // edición inline de la duración
   const [editing, setEditing] = useState(false);
   const [draftMin, setDraftMin] = useState("");
-
-  // pantalla completa
   const [fs, setFs] = useState(false);
   const [idle, setIdle] = useState(false);
   const shellRef = useRef(null);
   const idleTimer = useRef(null);
+  const claiming = useRef(false);
+  const retryAfter = useRef(0);
 
-  const restored = useRef(false);
+  const say = useCallback((msg, ms = 3200) => {
+    setFlash(msg);
+    setTimeout(() => setFlash((f) => (f === msg ? "" : f)), ms);
+  }, []);
 
   const durationOf = useCallback(
     (m) =>
@@ -102,273 +115,448 @@ export default function Timer({
     [settings]
   );
 
+  // ------------------------------------------------------ escribir estado
+
+  /** Aplica un cambio local y lo manda a la nube */
+  const commit = useCallback(
+    (patch) => {
+      const next = {
+        ...normalize({ ...tRef.current, ...patch }),
+        device_id: deviceId(),
+        updated_at: new Date().toISOString(),
+      };
+      tRef.current = next;
+      setT(next);
+      setNow(Date.now());
+      writeMirror(userId, next);
+      pushTimer(userId, next)
+        .then(() => setSyncError(""))
+        .catch((e) => setSyncError(e.message || String(e)));
+      return next;
+    },
+    [userId]
+  );
+
+  /** Aplica un estado que vino de la nube (otro dispositivo) */
+  const applyRemote = useCallback(
+    (row) => {
+      const next = normalize(row);
+      tRef.current = next;
+      setT(next);
+      setNow(Date.now());
+      writeMirror(userId, next);
+    },
+    [userId]
+  );
+
+  // ------------------------------------------------------------ hidratar
+
+  useEffect(() => {
+    let alive = true;
+    setHydrated(false);
+
+    const mirror = readMirror(userId);
+    if (mirror) {
+      tRef.current = mirror;
+      setT(mirror);
+    }
+
+    (async () => {
+      try {
+        const row = await fetchTimer(userId);
+        if (!alive) return;
+        if (row) applyRemote(row);
+        setSyncError("");
+      } catch (e) {
+        if (alive) setSyncError(e.message || String(e));
+      }
+      if (alive) {
+        setNow(Date.now());
+        setHydrated(true);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [userId, applyRemote]);
+
+  // ------------------------------------- escuchar los otros dispositivos
+
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeTimer(userId, applyRemote);
+  }, [userId, applyRemote]);
+
+  // Red de seguridad por si Realtime no está habilitado: al volver a la
+  // pestaña y cada 20s se relee el estado.
+  useEffect(() => {
+    if (!userId) return;
+    const sync = async () => {
+      try {
+        const row = await fetchTimer(userId);
+        if (row && row.device_id !== deviceId()) applyRemote(row);
+        setSyncError("");
+      } catch {
+        /* sin conexión: seguimos con el reloj local */
+      }
+    };
+    const onVisible = () => {
+      setNow(Date.now());
+      if (document.visibilityState === "visible") sync();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    const id = setInterval(sync, 20000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      clearInterval(id);
+    };
+  }, [userId, applyRemote]);
+
+  // ---------------------------------------------------------- derivados
+
+  const countUp = t.free_mode && t.mode === "focus";
+  const running = t.status === "running";
+
+  const duration =
+    t.status === "idle" ? durationOf(t.mode) : t.duration_seconds ?? durationOf(t.mode);
+
+  const remaining = countUp
+    ? 0
+    : running && t.ends_at
+    ? Math.max(0, (Date.parse(t.ends_at) - now) / 1000)
+    : t.status === "paused"
+    ? t.remaining_seconds ?? duration
+    : duration;
+
+  const elapsed = running && t.run_start ? Math.max(0, (now - Date.parse(t.run_start)) / 1000) : t.elapsed_seconds || 0;
+
+  const groupId = t.group_id || parents[0]?.id || "";
+  const subId = t.sub_group_id || "";
   const subs = useMemo(
     () => groups.filter((g) => g.parent_id === groupId && !g.archived),
     [groups, groupId]
   );
-
-  const countUp = freeMode && mode === "focus";
-
-  // ---------- restaurar tras un refresh ----------
-  useEffect(() => {
-    if (restored.current) return;
-    restored.current = true;
-    try {
-      const raw = localStorage.getItem(TIMER_KEY);
-      if (!raw) return;
-      const s = JSON.parse(raw);
-      setMode(s.mode || "focus");
-      setCycle(s.cycle || 0);
-      setGroupId(s.groupId || "");
-      setSubId(s.subId || "");
-      setFreeMode(!!s.freeMode);
-
-      if (s.freeMode && s.mode === "focus") {
-        setElapsed(s.elapsed || 0);
-        if (s.running && s.runStart) {
-          setRunStart(s.runStart);
-          setElapsed((Date.now() - s.runStart) / 1000);
-          setStartedAt(s.startedAt);
-          setRunning(true);
-        }
-        return;
-      }
-      if (s.running && s.endAt && s.endAt > Date.now()) {
-        setEndAt(s.endAt);
-        setStartedAt(s.startedAt);
-        setRemaining((s.endAt - Date.now()) / 1000);
-        setRunning(true);
-        return;
-      }
-      setRemaining(s.remaining ?? durationOf(s.mode || "focus"));
-    } catch {
-      /* noop */
-    }
-  }, [durationOf]);
-
-  useEffect(() => {
-    if (!groupId && parents.length) setGroupId(parents[0].id);
-  }, [parents, groupId]);
-
-  const prevGroup = useRef(null);
-  useEffect(() => {
-    if (prevGroup.current !== null && prevGroup.current !== groupId) setSubId("");
-    prevGroup.current = groupId;
-  }, [groupId]);
-
-  // ---------- persistir ----------
-  useEffect(() => {
-    if (!restored.current) return;
-    localStorage.setItem(
-      TIMER_KEY,
-      JSON.stringify({
-        mode,
-        running,
-        endAt,
-        remaining,
-        startedAt,
-        cycle,
-        groupId,
-        subId,
-        freeMode,
-        elapsed,
-        runStart,
-      })
-    );
-  }, [mode, running, endAt, remaining, startedAt, cycle, groupId, subId, freeMode, elapsed, runStart]);
-
-  useEffect(() => {
-    if (!running && !countUp) setRemaining(durationOf(mode));
-  }, [settings.focusMin, settings.shortMin, settings.longMin]); // eslint-disable-line
-
   const activeGroupId = subId || groupId;
-  const duration = durationOf(mode);
+
   const progress = countUp
     ? (elapsed % 3600) / 3600
     : duration > 0
     ? 1 - remaining / duration
     : 0;
 
-  // ---------- guardar sesión ----------
+  // -------------------------------------------------------------- tick
+
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [running]);
+
+  useEffect(() => {
+    document.title = running
+      ? `${fmtClock(countUp ? elapsed : remaining)} · ${MODES[t.mode].short}`
+      : "Pomodoro · Fabri";
+  }, [remaining, elapsed, running, t.mode, countUp]);
+
+  // ------------------------------------------------------ guardar sesión
+
   const saveSession = useCallback(
-    async (seconds) => {
-      if (seconds < 60 || !activeGroupId) return null;
+    async ({ seconds, startedAt, endedAt, groupId: gid }) => {
+      const secs = Math.round(seconds);
+      if (secs < 60 || !gid) return null;
+      const end = endedAt || iso(Date.now());
       try {
         const saved = await createSession({
-          group_id: activeGroupId,
+          group_id: gid,
           mode: "focus",
-          started_at: new Date(startedAt || Date.now() - seconds * 1000).toISOString(),
-          ended_at: new Date().toISOString(),
-          duration_seconds: seconds,
-          local_date: todayKey(),
+          started_at: startedAt || iso(Date.parse(end) - secs * 1000),
+          ended_at: end,
+          duration_seconds: secs,
+          local_date: toKey(new Date(end)),
         });
         onSaved?.();
-        setFlash(`Guardado · ${fmtDur(seconds)}`);
-        setTimeout(() => setFlash(""), 3200);
         return saved;
       } catch (e) {
-        setFlash("Error al guardar: " + (e.message || e));
-        setTimeout(() => setFlash(""), 5000);
+        say("Error al guardar: " + (e.message || e), 5000);
         return null;
       }
     },
-    [activeGroupId, onSaved, startedAt]
+    [onSaved, say]
   );
 
-  const finish = useCallback(
-    async (completed) => {
-      const elapsedSec = completed ? duration : duration - remaining;
-      const wasFocus = mode === "focus";
-      setRunning(false);
-      setEndAt(null);
-
-      if (settings.sound) beep(settings.volume, completed ? 3 : 1);
-
-      let saved = null;
-      if (wasFocus) saved = await saveSession(elapsedSec);
-
-      if (completed && settings.notifications) {
-        notify(
-          wasFocus ? "Pomodoro completado" : "Descanso terminado",
-          wasFocus ? "Tomate un respiro, Fabri." : "Dale, volvé a la carga."
-        );
-      }
-
-      // siguiente modo (si el descanso dura 0, se saltea)
-      let next = "focus";
-      let nextCycle = cycle;
-      if (wasFocus) {
-        nextCycle = cycle + 1;
-        const candidate =
-          nextCycle % Math.max(1, settings.longEvery) === 0 ? "long" : "short";
-        next = durationOf(candidate) > 0 ? candidate : "focus";
-      }
-      setCycle(nextCycle);
-      setMode(next);
-      setRemaining(durationOf(next));
-      setStartedAt(null);
-
-      if (completed) {
-        const auto = next === "focus" ? settings.autoStartFocus : settings.autoStartBreaks;
-        if (auto && durationOf(next) > 0) {
-          setStartedAt(Date.now());
-          setEndAt(Date.now() + durationOf(next) * 1000);
-          setRunning(true);
-        }
-      }
-
+  const askNote = useCallback(
+    (saved) => {
       if (saved && settings.askNote) {
         setNote("");
         setNoteFor(saved.id);
       }
     },
-    [cycle, duration, durationOf, mode, remaining, saveSession, settings]
+    [settings.askNote]
   );
 
-  // ---------- tick ----------
-  const finishRef = useRef(finish);
-  useEffect(() => {
-    finishRef.current = finish;
-  }, [finish]);
+  /** Qué viene después de terminar el bloque actual */
+  const nextModeAfter = useCallback(
+    (state) => {
+      if (state.mode !== "focus") return "focus";
+      const cyc = state.cycle + 1;
+      const candidate = cyc % Math.max(1, settings.longEvery) === 0 ? "long" : "short";
+      return durationOf(candidate) > 0 ? candidate : "focus";
+    },
+    [durationOf, settings.longEvery]
+  );
 
-  useEffect(() => {
-    if (!running) return;
+  // --------------------------------------------- el bloque llegó a cero
+  //  Corre tanto si estabas mirando como si volvés días después: el fin
+  //  está guardado en la nube, así que la sesión se registra igual.
 
-    if (countUp) {
-      const id = setInterval(() => {
-        if (runStart) setElapsed((Date.now() - runStart) / 1000);
-      }, 250);
-      return () => clearInterval(id);
-    }
+  const handleExpired = useCallback(
+    async (state) => {
+      if (claiming.current || Date.now() < retryAfter.current) return;
+      claiming.current = true;
+      try {
+        const endsAt = state.ends_at;
+        const endedMs = Date.parse(endsAt);
+        const staleSec = (Date.now() - endedMs) / 1000;
+        const wasFocus = state.mode === "focus";
+        const blockSec = state.duration_seconds ?? Math.max(0, (endedMs - Date.parse(state.started_at || endsAt)) / 1000);
 
-    if (!endAt) return;
-    const id = setInterval(() => {
-      const left = (endAt - Date.now()) / 1000;
-      if (left <= 0) {
-        setRemaining(0);
-        finishRef.current(true);
-      } else {
-        setRemaining(left);
+        const nextMode = nextModeAfter(state);
+        const nextDur = durationOf(nextMode);
+        const autoStart =
+          staleSec < STALE_SEC &&
+          nextDur > 0 &&
+          (nextMode === "focus" ? settings.autoStartFocus : settings.autoStartBreaks);
+        const startMs = Date.now();
+
+        const next = {
+          ...state,
+          mode: nextMode,
+          cycle: wasFocus ? state.cycle + 1 : state.cycle,
+          status: autoStart ? "running" : "idle",
+          started_at: autoStart ? iso(startMs) : null,
+          ends_at: autoStart ? iso(startMs + nextDur * 1000) : null,
+          remaining_seconds: null,
+          duration_seconds: autoStart ? Math.round(nextDur) : null,
+          elapsed_seconds: 0,
+          run_start: null,
+        };
+
+        // Solo un dispositivo se queda con el bloque vencido: así la
+        // sesión nunca se guarda dos veces.
+        const won = await claimExpired(userId, endsAt, next);
+        if (!won) {
+          const row = await fetchTimer(userId);
+          const yaCerrado = row && (row.status !== "running" || row.ends_at !== endsAt);
+          if (yaCerrado) {
+            applyRemote(row); // lo cerró otro dispositivo
+            return;
+          }
+          // no había fila que reclamar (p. ej. veníamos de la copia local):
+          // la escribimos nosotros y seguimos
+          await pushTimer(userId, next);
+        }
+        applyRemote({ ...next, device_id: deviceId(), updated_at: new Date().toISOString() });
+
+        if (wasFocus) {
+          const saved = await saveSession({
+            seconds: blockSec,
+            startedAt: state.started_at,
+            endedAt: endsAt,
+            groupId: state.sub_group_id || state.group_id,
+          });
+          if (staleSec >= STALE_SEC) {
+            say(
+              saved
+                ? `Tu pomodoro terminó mientras no estabas · ${fmtDur(blockSec)} guardados`
+                : "Tu pomodoro terminó mientras no estabas",
+              6000
+            );
+          } else {
+            say(saved ? `Guardado · ${fmtDur(blockSec)}` : "Pomodoro completado");
+          }
+          askNote(saved);
+        } else if (staleSec >= STALE_SEC) {
+          say("El descanso ya había terminado", 4000);
+        }
+
+        if (staleSec < STALE_SEC) {
+          if (settings.sound) beep(settings.volume, 3);
+          if (settings.notifications) {
+            notify(
+              wasFocus ? "Pomodoro completado" : "Descanso terminado",
+              wasFocus ? "Tomate un respiro, Fabri." : "Dale, volvé a la carga."
+            );
+          }
+        }
+      } catch (e) {
+        retryAfter.current = Date.now() + 8000; // no martillar si no hay red
+        setSyncError(e.message || String(e));
+      } finally {
+        claiming.current = false;
       }
-    }, 250);
-    return () => clearInterval(id);
-  }, [running, endAt, countUp, runStart]);
+    },
+    [applyRemote, askNote, durationOf, nextModeAfter, saveSession, say, settings, userId]
+  );
 
   useEffect(() => {
-    document.title = running
-      ? `${fmtClock(countUp ? elapsed : remaining)} · ${MODES[mode].short}`
-      : "Pomodoro · Fabri";
-  }, [remaining, elapsed, running, mode, countUp]);
+    if (!hydrated) return;
+    if (t.status !== "running" || t.free_mode || !t.ends_at) return;
+    if (Date.parse(t.ends_at) > Date.now()) return;
+    handleExpired(t);
+  }, [t, now, hydrated, handleExpired]);
 
-  // ---------- controles ----------
+  // ----------------------------------------------------------- controles
+
   const start = () => {
+    if (!countUp && duration <= 0) return;
     if (settings.notifications && typeof Notification !== "undefined") {
       if (Notification.permission === "default") Notification.requestPermission();
     }
+    const ms = Date.now();
     if (countUp) {
-      setRunStart(Date.now() - elapsed * 1000);
-      setStartedAt(startedAt || Date.now());
-      setRunning(true);
+      commit({
+        status: "running",
+        group_id: groupId || null,
+        sub_group_id: subId || null,
+        started_at: t.started_at || iso(ms),
+        run_start: iso(ms - (t.elapsed_seconds || 0) * 1000),
+      });
       return;
     }
-    setStartedAt(startedAt || Date.now());
-    setEndAt(Date.now() + remaining * 1000);
-    setRunning(true);
+    const secs = remaining > 0 ? remaining : duration;
+    commit({
+      status: "running",
+      group_id: groupId || null,
+      sub_group_id: subId || null,
+      started_at: t.started_at || iso(ms),
+      ends_at: iso(ms + secs * 1000),
+      duration_seconds: Math.round(duration),
+      remaining_seconds: null,
+      elapsed_seconds: 0,
+      run_start: null,
+    });
   };
 
   const pause = () => {
     if (countUp) {
-      setElapsed(runStart ? (Date.now() - runStart) / 1000 : elapsed);
-      setRunning(false);
+      commit({ status: "paused", elapsed_seconds: elapsed, run_start: null });
       return;
     }
-    setRemaining(Math.max(0, (endAt - Date.now()) / 1000));
-    setEndAt(null);
-    setRunning(false);
+    commit({ status: "paused", remaining_seconds: Math.max(0, remaining), ends_at: null });
   };
 
-  const reset = () => {
-    setRunning(false);
-    setEndAt(null);
-    setStartedAt(null);
-    setRunStart(null);
-    setElapsed(0);
-    setRemaining(durationOf(mode));
+  /** Cancelar: la única forma de frenar el pomodoro sin guardarlo */
+  const cancel = () => {
+    const hadRun = t.status !== "idle";
+    commit({
+      status: "idle",
+      started_at: null,
+      ends_at: null,
+      remaining_seconds: null,
+      duration_seconds: null,
+      elapsed_seconds: 0,
+      run_start: null,
+    });
+    if (hadRun) say("Pomodoro cancelado");
   };
 
+  /** Corta el bloque en curso: guarda lo hecho (si es enfoque) y sigue */
+  const finishNow = async (save) => {
+    const state = tRef.current;
+    const done = Math.max(0, duration - remaining);
+    const wasFocus = state.mode === "focus";
+    const nextMode = nextModeAfter(state);
+
+    commit({
+      mode: nextMode,
+      cycle: wasFocus ? state.cycle + 1 : state.cycle,
+      status: "idle",
+      started_at: null,
+      ends_at: null,
+      remaining_seconds: null,
+      duration_seconds: null,
+      elapsed_seconds: 0,
+      run_start: null,
+    });
+
+    if (settings.sound) beep(settings.volume, 1);
+    if (!save || !wasFocus) return;
+
+    const saved = await saveSession({
+      seconds: done,
+      startedAt: state.started_at,
+      endedAt: iso(Date.now()),
+      groupId: state.sub_group_id || state.group_id || activeGroupId,
+    });
+    if (saved) say(`Guardado · ${fmtDur(done)}`);
+    askNote(saved);
+  };
+
+  /** Modo libre: frenar y guardar lo cronometrado */
   const stopFree = async () => {
-    const secs = runStart && running ? (Date.now() - runStart) / 1000 : elapsed;
-    setRunning(false);
-    setRunStart(null);
+    const state = tRef.current;
+    const secs = elapsed;
+    commit({
+      status: "idle",
+      started_at: null,
+      elapsed_seconds: 0,
+      run_start: null,
+      remaining_seconds: null,
+      duration_seconds: null,
+    });
     if (settings.sound) beep(settings.volume, 2);
-    const saved = await saveSession(Math.round(secs));
-    setElapsed(0);
-    setStartedAt(null);
-    if (saved && settings.askNote) {
-      setNote("");
-      setNoteFor(saved.id);
-    }
+    const saved = await saveSession({
+      seconds: secs,
+      startedAt: state.started_at,
+      endedAt: iso(Date.now()),
+      groupId: state.sub_group_id || state.group_id || activeGroupId,
+    });
+    if (saved) say(`Guardado · ${fmtDur(secs)}`);
+    askNote(saved);
   };
 
   const switchMode = (m) => {
-    setRunning(false);
-    setEndAt(null);
-    setStartedAt(null);
-    setRunStart(null);
-    setElapsed(0);
-    setMode(m);
-    setRemaining(durationOf(m));
+    commit({
+      mode: m,
+      status: "idle",
+      started_at: null,
+      ends_at: null,
+      remaining_seconds: null,
+      duration_seconds: null,
+      elapsed_seconds: 0,
+      run_start: null,
+    });
+  };
+
+  const toggleFree = () => {
+    commit({
+      free_mode: !t.free_mode,
+      mode: "focus",
+      status: "idle",
+      started_at: null,
+      ends_at: null,
+      remaining_seconds: null,
+      duration_seconds: null,
+      elapsed_seconds: 0,
+      run_start: null,
+    });
   };
 
   const applyMinutes = (min) => {
     const v = Math.max(0, Math.min(600, Math.round(Number(min) || 0)));
-    const key = mode === "focus" ? "focusMin" : mode === "short" ? "shortMin" : "longMin";
-    if (mode === "focus" && v < 1) return;
+    const key = t.mode === "focus" ? "focusMin" : t.mode === "short" ? "shortMin" : "longMin";
+    if (t.mode === "focus" && v < 1) return;
     setSettings({ ...settings, [key]: v });
-    setRunning(false);
-    setEndAt(null);
-    setStartedAt(null);
-    setRemaining(v * 60);
+    commit({
+      status: "idle",
+      started_at: null,
+      ends_at: null,
+      remaining_seconds: null,
+      duration_seconds: null,
+    });
     setEditing(false);
   };
 
@@ -380,7 +568,8 @@ export default function Timer({
     setNoteFor(null);
   };
 
-  // ---------- pantalla completa ----------
+  // ---------------------------------------------------- pantalla completa
+
   const toggleFs = async () => {
     try {
       if (!document.fullscreenElement) await shellRef.current?.requestFullscreen?.();
@@ -425,19 +614,26 @@ export default function Timer({
     };
   }, [fs]);
 
-  // ---------- meta semanal ----------
+  // ---------------------------------------------------------- meta semanal
+
   const parent = parents.find((g) => g.id === groupId);
   const goalMin = parent?.weekly_goal_minutes || 0;
   const weekSec = weekByGroup?.[groupId] || 0;
   const goalPct = goalMin ? (weekSec / 60 / goalMin) * 100 : 0;
 
   useThemeVersion(); // repinta el reloj cuando cambian los colores
-  const color = themeColor(MODES[mode].token);
+  const color = themeColor(MODES[t.mode].token);
   const R = 132;
   const C = 2 * Math.PI * R;
   const clock = fmtClock(countUp ? elapsed : remaining);
-  const activeName =
-    groups.find((g) => g.id === activeGroupId)?.name || "Sin grupo";
+  const activeName = groups.find((g) => g.id === activeGroupId)?.name || "Sin grupo";
+  const startLabel = countUp
+    ? elapsed > 0
+      ? "Seguir"
+      : "Iniciar"
+    : t.status === "paused" || remaining < duration
+    ? "Seguir"
+    : "Iniciar";
 
   /* ------------------------------------------------ PANTALLA COMPLETA */
   const fullscreenView = (
@@ -452,7 +648,7 @@ export default function Timer({
           idle ? "opacity-30" : "opacity-100"
         }`}
       >
-        {mode === "focus" ? activeName : MODES[mode].label}
+        {t.mode === "focus" ? activeName : MODES[t.mode].label}
       </p>
 
       <div
@@ -481,7 +677,7 @@ export default function Timer({
             className="btn px-8 py-3 text-base font-bold"
             style={{ background: color, color: readableOn(color) }}
           >
-            {countUp ? (elapsed > 0 ? "Seguir" : "Iniciar") : remaining < duration ? "Seguir" : "Iniciar"}
+            {startLabel}
           </button>
         )}
         {countUp ? (
@@ -489,8 +685,8 @@ export default function Timer({
             Frenar y guardar
           </button>
         ) : (
-          <button onClick={reset} className="btn-ghost px-6 py-3">
-            Reiniciar
+          <button onClick={cancel} className="btn-ghost px-6 py-3">
+            Cancelar
           </button>
         )}
         <button onClick={toggleFs} className="btn-quiet px-6 py-3">
@@ -498,9 +694,7 @@ export default function Timer({
         </button>
       </div>
 
-      {flash && (
-        <p className="mt-6 text-sm font-semibold text-rest animate-fadeUp">{flash}</p>
-      )}
+      {flash && <p className="mt-6 text-sm font-semibold text-rest animate-fadeUp">{flash}</p>}
     </div>
   );
 
@@ -527,34 +721,25 @@ export default function Timer({
             <div className="relative flex flex-wrap items-center justify-center gap-2">
               {Object.entries(MODES).map(([k, v]) => {
                 const off = k !== "focus" && durationOf(k) === 0;
+                const c = themeColor(v.token);
                 return (
                   <button
                     key={k}
                     onClick={() => switchMode(k)}
-                    className={`chip ${mode === k ? "chip-on" : ""} ${off ? "opacity-45" : ""}`}
+                    className={`chip ${t.mode === k ? "chip-on" : ""} ${off ? "opacity-45" : ""}`}
                     style={
-                      mode === k
-                        ? { borderColor: `${v.color}88`, background: `${v.color}1f` }
-                        : undefined
+                      t.mode === k ? { borderColor: `${c}88`, background: `${c}1f` } : undefined
                     }
                   >
-                    <span className="h-2 w-2 rounded-full" style={{ background: v.color }} />
+                    <span className="h-2 w-2 rounded-full" style={{ background: c }} />
                     {v.label}
                     {off && <span className="text-[10px]">· off</span>}
                   </button>
                 );
               })}
               <button
-                onClick={() => {
-                  setFreeMode((v) => !v);
-                  setRunning(false);
-                  setEndAt(null);
-                  setElapsed(0);
-                  setRunStart(null);
-                  setMode("focus");
-                  setRemaining(durationOf("focus"));
-                }}
-                className={`chip ${freeMode ? "chip-on" : ""}`}
+                onClick={toggleFree}
+                className={`chip ${t.free_mode ? "chip-on" : ""}`}
                 title="Cronómetro libre, sin límite de tiempo"
               >
                 ∞ Libre
@@ -594,7 +779,7 @@ export default function Timer({
                     <input
                       autoFocus
                       type="number"
-                      min={mode === "focus" ? 1 : 0}
+                      min={t.mode === "focus" ? 1 : 0}
                       max="600"
                       value={draftMin}
                       onChange={(e) => setDraftMin(e.target.value)}
@@ -605,7 +790,10 @@ export default function Timer({
                       className="field w-32 text-center text-3xl font-bold"
                     />
                     <div className="flex gap-2">
-                      <button onClick={() => applyMinutes(draftMin)} className="btn-primary px-3 py-1 text-xs">
+                      <button
+                        onClick={() => applyMinutes(draftMin)}
+                        className="btn-primary px-3 py-1 text-xs"
+                      >
                         Aplicar
                       </button>
                       <button onClick={() => setEditing(false)} className="btn-quiet px-3 py-1 text-xs">
@@ -628,7 +816,7 @@ export default function Timer({
                       {clock}
                     </button>
                     <div className="mt-2 text-xs font-semibold uppercase tracking-[.2em] text-muted">
-                      {countUp ? "Modo libre" : MODES[mode].label}
+                      {countUp ? "Modo libre" : MODES[t.mode].label}
                     </div>
                   </>
                 )}
@@ -641,7 +829,7 @@ export default function Timer({
                         className="h-1.5 w-1.5 rounded-full transition-colors"
                         style={{
                           background:
-                            i < cycle % Math.max(1, settings.longEvery)
+                            i < t.cycle % Math.max(1, settings.longEvery)
                               ? color
                               : "rgb(var(--c-surface3))",
                         }}
@@ -655,7 +843,7 @@ export default function Timer({
             {/* presets rápidos */}
             {!countUp && (
               <div className="relative mt-5 flex flex-wrap items-center justify-center gap-1.5">
-                {PRESETS[mode].map((p) => (
+                {PRESETS[t.mode].map((p) => (
                   <button
                     key={p}
                     onClick={() => applyMinutes(p)}
@@ -693,13 +881,7 @@ export default function Timer({
                     boxShadow: `0 12px 34px -14px ${color}`,
                   }}
                 >
-                  {countUp
-                    ? elapsed > 0
-                      ? "Seguir"
-                      : "Iniciar"
-                    : remaining < duration
-                    ? "Seguir"
-                    : "Iniciar"}
+                  {startLabel}
                 </button>
               )}
 
@@ -709,15 +891,15 @@ export default function Timer({
                 </button>
               ) : (
                 <>
-                  <button onClick={reset} className="btn-ghost py-3">
-                    Reiniciar
+                  <button onClick={cancel} className="btn-ghost py-3">
+                    {t.status === "idle" ? "Reiniciar" : "Cancelar"}
                   </button>
-                  {mode === "focus" && remaining < duration - 59 && (
-                    <button onClick={() => finish(false)} className="btn-ghost py-3">
+                  {t.mode === "focus" && remaining < duration - 59 && (
+                    <button onClick={() => finishNow(true)} className="btn-ghost py-3">
                       Frenar y guardar
                     </button>
                   )}
-                  <button onClick={() => finish(false)} className="btn-quiet py-3">
+                  <button onClick={() => finishNow(false)} className="btn-quiet py-3">
                     Saltar →
                   </button>
                 </>
@@ -733,9 +915,14 @@ export default function Timer({
                 {flash}
               </p>
             )}
-            {mode === "focus" && !activeGroupId && (
+            {t.mode === "focus" && !activeGroupId && (
               <p className="relative mt-4 text-center text-xs text-focus">
                 Elegí un grupo para que la sesión se guarde.
+              </p>
+            )}
+            {syncError && (
+              <p className="relative mt-3 text-center text-xs text-warn">
+                Sin sincronizar: {syncError}
               </p>
             )}
           </>
@@ -746,7 +933,11 @@ export default function Timer({
       <div className={`flex flex-col gap-4 ${fs ? "hidden" : ""}`}>
         <div className="card p-5">
           <p className="label">¿En qué estás trabajando?</p>
-          <select className="field" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+          <select
+            className="field"
+            value={groupId}
+            onChange={(e) => commit({ group_id: e.target.value || null, sub_group_id: null })}
+          >
             {parents.length === 0 && <option value="">Creá un grupo primero</option>}
             {parents.map((g) => (
               <option key={g.id} value={g.id}>
@@ -759,13 +950,16 @@ export default function Timer({
             <>
               <p className="label mt-4">Subgrupo</p>
               <div className="flex flex-wrap gap-1.5">
-                <button onClick={() => setSubId("")} className={`chip ${!subId ? "chip-on" : ""}`}>
+                <button
+                  onClick={() => commit({ group_id: groupId || null, sub_group_id: null })}
+                  className={`chip ${!subId ? "chip-on" : ""}`}
+                >
                   General
                 </button>
                 {subs.map((s) => (
                   <button
                     key={s.id}
-                    onClick={() => setSubId(s.id)}
+                    onClick={() => commit({ group_id: groupId || null, sub_group_id: s.id })}
                     className={`chip ${subId === s.id ? "chip-on" : ""}`}
                   >
                     {s.name}
@@ -799,11 +993,22 @@ export default function Timer({
           )}
         </div>
 
+        {userId && (
+          <div className="card p-5 text-xs leading-relaxed text-muted">
+            <p className="label">Timer en la nube</p>
+            <p>
+              {running
+                ? "Está corriendo en tu cuenta: podés cerrar la web o seguir desde el celular, sigue igual."
+                : "Cuando lo inicies va a seguir corriendo aunque cierres la web. Solo se detiene si lo cancelás."}
+            </p>
+          </div>
+        )}
+
         <div className="card p-5 text-xs leading-relaxed text-muted">
           <p className="label">Atajos</p>
           <p>
             <b className="text-ink">Espacio</b> iniciar / pausar · <b className="text-ink">R</b>{" "}
-            reiniciar · <b className="text-ink">F</b> pantalla completa
+            cancelar · <b className="text-ink">F</b> pantalla completa
           </p>
           <p className="mt-2">
             Tocá el número del reloj para cambiar la duración. Poné un descanso en{" "}
@@ -833,7 +1038,7 @@ export default function Timer({
 
       <KeyBinds
         onSpace={() => (running ? pause() : start())}
-        onR={reset}
+        onR={cancel}
         onF={toggleFs}
         disabled={editing || !!noteFor}
       />

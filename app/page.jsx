@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Welcome from "@/components/Welcome";
+import Auth from "@/components/Auth";
 import Timer from "@/components/Timer";
 import Analytics from "@/components/Analytics";
 import Sleep from "@/components/Sleep";
@@ -15,6 +16,7 @@ import {
   listGroups,
   DEFAULT_SETTINGS,
 } from "@/lib/db";
+import { AuthProvider, useAuth, useSignOut } from "@/lib/auth";
 import { fmtDur, periodRange, todayKey } from "@/lib/utils";
 import { applyTheme } from "@/lib/theme";
 
@@ -27,6 +29,37 @@ const TABS = [
 ];
 
 export default function Page() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
+  );
+}
+
+/** Pantalla de cuenta primero; la app recién cuando hay sesión */
+function Gate() {
+  const { user, loading, needsAuth } = useAuth();
+
+  // el tema se pinta también en la pantalla de login
+  useEffect(() => {
+    applyTheme(loadSettings().theme);
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center text-sm text-muted">
+        Cargando…
+      </div>
+    );
+  }
+  if (needsAuth) return <Auth />;
+
+  // key: al cambiar de cuenta la app se reinicia limpia
+  return <App key={user?.id || "local"} userId={user?.id || null} email={user?.email || ""} />;
+}
+
+function App({ userId, email }) {
+  const signOut = useSignOut();
   const [showWelcome, setShowWelcome] = useState(true);
   const [tab, setTab] = useState("timer");
   const [groups, setGroups] = useState([]);
@@ -35,6 +68,7 @@ export default function Page() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
+  const [menu, setMenu] = useState(false);
 
   const setSettings = (s) => {
     setSettingsState(s);
@@ -119,6 +153,39 @@ export default function Page() {
               <p className="text-[10px] uppercase tracking-[.14em] text-muted">Semana</p>
               <p className="tnum text-sm font-bold">{fmtDur(weekTotal)}</p>
             </div>
+
+            {userId && (
+              <div className="relative">
+                <button
+                  onClick={() => setMenu((v) => !v)}
+                  title={email}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-surface2/70 text-sm font-bold uppercase text-ink transition hover:bg-surface3"
+                >
+                  {(email || "?").charAt(0)}
+                </button>
+                {menu && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} />
+                    <div className="card absolute right-0 z-50 mt-2 w-60 p-3 text-left">
+                      <p className="truncate text-xs text-muted">Sesión iniciada como</p>
+                      <p className="mb-3 truncate text-sm font-semibold">{email}</p>
+                      <button
+                        onClick={() => {
+                          setMenu(false);
+                          setTab("settings");
+                        }}
+                        className="btn-quiet w-full justify-start text-sm"
+                      >
+                        Cuenta y ajustes
+                      </button>
+                      <button onClick={signOut} className="btn-ghost mt-1 w-full text-sm">
+                        Cerrar sesión
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </header>
 
@@ -160,6 +227,7 @@ export default function Page() {
                 onSaved={refresh}
                 todaySec={todaySec}
                 weekByGroup={weekByGroup}
+                userId={userId}
               />
             )}
             {tab === "stats" && (
@@ -170,7 +238,13 @@ export default function Page() {
               <GroupsManager groups={groups} weekByGroup={weekByGroup} onChange={refresh} />
             )}
             {tab === "settings" && (
-              <SettingsPanel settings={settings} setSettings={setSettings} onChange={refresh} />
+              <SettingsPanel
+                settings={settings}
+                setSettings={setSettings}
+                onChange={refresh}
+                email={email}
+                userId={userId}
+              />
             )}
           </main>
         )}

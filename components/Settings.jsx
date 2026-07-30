@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { backend, exportAll, importAll, DEFAULT_SETTINGS } from "@/lib/db";
+import { backend, exportAll, importAll, readLocalBackup, DEFAULT_SETTINGS } from "@/lib/db";
+import { friendlyError, updatePassword, useSignOut } from "@/lib/auth";
 import { todayKey } from "@/lib/utils";
 import Appearance from "./Appearance";
 
@@ -45,9 +46,70 @@ function Num({ value, onChange, min = 1, max = 600 }) {
   );
 }
 
-export default function Settings({ settings, setSettings, onChange }) {
+function Account({ email }) {
+  const signOut = useSignOut();
+  const [pass, setPass] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const change = async () => {
+    setMsg("");
+    setErr("");
+    if (pass.length < 6) {
+      setErr("La contraseña necesita al menos 6 caracteres.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await updatePassword(pass);
+      setPass("");
+      setMsg("Contraseña actualizada.");
+    } catch (e) {
+      setErr(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card p-5">
+      <p className="label">Cuenta</p>
+      <Row title="Sesión iniciada" desc={email}>
+        <button onClick={signOut} className="btn-ghost text-xs">
+          Cerrar sesión
+        </button>
+      </Row>
+      <div className="pt-3.5">
+        <p className="text-sm font-medium">Cambiar contraseña</p>
+        <div className="mt-2 flex gap-2">
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder="nueva contraseña"
+            className="field"
+            value={pass}
+            onChange={(e) => setPass(e.target.value)}
+          />
+          <button onClick={change} disabled={busy || !pass} className="btn-ghost shrink-0">
+            Cambiar
+          </button>
+        </div>
+        {err && <p className="mt-2 text-xs font-semibold text-focus">{err}</p>}
+        {msg && <p className="mt-2 text-xs font-semibold text-rest">{msg}</p>}
+      </div>
+    </div>
+  );
+}
+
+const UPLOADED_KEY = "pf.localUploaded";
+
+export default function Settings({ settings, setSettings, onChange, email, userId }) {
   const fileRef = useRef(null);
   const [msg, setMsg] = useState("");
+  const [uploaded, setUploaded] = useState(
+    () => typeof window !== "undefined" && !!window.localStorage.getItem(UPLOADED_KEY)
+  );
 
   const set = (k, v) => setSettings({ ...settings, [k]: v });
 
@@ -59,6 +121,24 @@ export default function Settings({ settings, setSettings, onChange }) {
     a.download = `pomodoro-fabri-${todayKey()}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+
+  // datos que hayan quedado de la época sin cuentas, en este navegador
+  const local = userId ? readLocalBackup() : { groups: [], sessions: [] };
+  const hasLocal =
+    (local.groups.length > 0 || local.sessions.length > 0) && !uploaded;
+
+  const uploadLocal = async () => {
+    try {
+      await importAll(local);
+      await onChange();
+      window.localStorage.setItem(UPLOADED_KEY, "1");
+      setUploaded(true);
+      setMsg("Listo: los datos de este navegador quedaron en tu cuenta.");
+    } catch (e) {
+      setMsg("Error al subir: " + (e.message || e));
+    }
+    setTimeout(() => setMsg(""), 6000);
   };
 
   const doImport = async (file) => {
@@ -77,8 +157,13 @@ export default function Settings({ settings, setSettings, onChange }) {
     <div className="mx-auto max-w-2xl space-y-5">
       <div>
         <h2 className="text-lg font-bold">Ajustes</h2>
-        <p className="text-sm text-muted">Se guardan en este dispositivo.</p>
+        <p className="text-sm text-muted">
+          Las preferencias se guardan en este dispositivo; los grupos, las sesiones y el
+          pomodoro en curso viven en tu cuenta.
+        </p>
       </div>
+
+      {userId && <Account email={email} />}
 
       <div className="card p-5">
         <p className="label">Duraciones</p>
@@ -155,7 +240,8 @@ export default function Settings({ settings, setSettings, onChange }) {
         >
           {backend === "supabase" ? (
             <>
-              <b>Supabase conectado.</b> Tus datos se sincronizan entre todos tus dispositivos.
+              <b>Supabase conectado.</b> Tus datos y el timer se sincronizan entre todos tus
+              dispositivos: podés cerrar la web y el pomodoro sigue corriendo.
             </>
           ) : (
             <>
@@ -185,6 +271,17 @@ export default function Settings({ settings, setSettings, onChange }) {
             Restaurar ajustes
           </button>
         </div>
+        {hasLocal && (
+          <div className="mt-4 rounded-xl border border-line bg-surface2/50 p-3">
+            <p className="text-xs text-muted">
+              Encontré datos guardados solo en este navegador ({local.groups.length} grupos ·{" "}
+              {local.sessions.length} sesiones), de antes de tener cuenta.
+            </p>
+            <button onClick={uploadLocal} className="btn-ghost mt-2 text-xs">
+              Subirlos a mi cuenta
+            </button>
+          </div>
+        )}
         {msg && <p className="mt-3 text-sm font-semibold text-rest">{msg}</p>}
       </div>
     </div>
