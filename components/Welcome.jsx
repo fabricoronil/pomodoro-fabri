@@ -25,7 +25,13 @@ export default function Welcome({ onDone }) {
         step === 2 ? "pointer-events-none scale-105 opacity-0" : "opacity-100"
       }`}
     >
-      <div className="pointer-events-none absolute inset-0 animate-glow bg-[radial-gradient(600px_400px_at_50%_45%,rgba(139,92,246,.28),transparent_65%)]" />
+      <div
+        className="pointer-events-none absolute inset-0 animate-glow"
+        style={{
+          background:
+            "radial-gradient(600px 400px at 50% 45%, rgb(var(--c-accent) / .28), transparent 65%)",
+        }}
+      />
 
       <div className="relative flex flex-col items-center px-6 text-center">
         <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-2xl border border-accent/40 bg-accent/10 animate-pop">
@@ -38,7 +44,7 @@ export default function Welcome({ onDone }) {
           }`}
         >
           <span className="text-muted">{greeting}, </span>
-          <span className="bg-gradient-to-r from-accent via-fuchsia-400 to-accent2 bg-clip-text text-transparent">
+          <span className="bg-gradient-to-r from-accent via-focus to-accent2 bg-clip-text text-transparent">
             {`Bienvenido ${NAME}`}
           </span>
         </h1>

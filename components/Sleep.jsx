@@ -22,14 +22,16 @@ import {
   todayKey,
   toKey,
 } from "@/lib/utils";
+import { themeColor, themeColorA, useThemeVersion } from "@/lib/theme";
 import { Empty, Stat, Segmented } from "./ui";
 
 const IDEAL = 8;
 
 const colorFor = (h) =>
-  h >= 7.5 ? "#34d399" : h >= 6.5 ? "#fbbf24" : h > 0 ? "#f0616d" : "#2a3145";
+  h >= 7.5 ? themeColor("rest") : h >= 6.5 ? "#fbbf24" : h > 0 ? themeColor("focus") : themeColor("surface3");
 
 export default function Sleep({ onChange }) {
+  useThemeVersion(); // el gráfico usa los colores del tema
   const [logs, setLogs] = useState([]);
   const [span, setSpan] = useState(14);
   const [dateKey, setDateKey] = useState(todayKey());
@@ -158,7 +160,7 @@ export default function Sleep({ onChange }) {
           label="Deuda de sueño (7d)"
           value={debt === null ? "—" : `${debt > 0 ? "+" : ""}${debt} h`}
           sub={debt === null ? "" : debt > 0 ? `vs. ${IDEAL}h por noche` : "Estás al día"}
-          accent={debt !== null && debt > 3 ? "#f0616d" : "#34d399"}
+          accent={themeColor(debt !== null && debt > 3 ? "focus" : "rest")}
         />
         <Stat label="Racha ≥7h" value={`${streak} ${streak === 1 ? "día" : "días"}`} />
       </div>
@@ -226,16 +228,17 @@ export default function Sleep({ onChange }) {
                 <XAxis dataKey="label" tickLine={false} axisLine={false} interval="preserveStartEnd" />
                 <YAxis tickLine={false} axisLine={false} domain={[0, 12]} />
                 <Tooltip
-                  cursor={{ fill: "rgba(255,255,255,.04)" }}
+                  cursor={{ fill: themeColorA("ink", 0.05) }}
                   contentStyle={{
-                    background: "#141821",
-                    border: "1px solid #262c3d",
+                    background: "rgb(var(--c-surface))",
+                    border: "1px solid rgb(var(--c-line))",
+                    color: "rgb(var(--c-ink))",
                     borderRadius: 12,
                     fontSize: 12,
                   }}
                   formatter={(v) => [`${v} h`, "Sueño"]}
                 />
-                <ReferenceLine y={IDEAL} stroke="#8b5cf6" strokeDasharray="4 4" />
+                <ReferenceLine y={IDEAL} stroke={themeColor("accent")} strokeDasharray="4 4" />
                 <RBar dataKey="hours" radius={[6, 6, 0, 0]} maxBarSize={34}>
                   {chartData.map((d) => (
                     <Cell key={d.key} fill={colorFor(d.hours)} />

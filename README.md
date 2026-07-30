@@ -16,6 +16,7 @@ Next.js 14 + Tailwind + Supabase. Pensado para hostear en Vercel y abrir desde c
 - **Sueño**: a qué hora te acostaste y te despertaste, promedio de 7 días, deuda de sueño y racha.
 - **Sueño vs productividad**: correlación de Pearson + cuántas horas estudiás según cuánto dormiste.
 - **Sonido y notificaciones** del navegador al terminar cada bloque.
+- **Apariencia**: 8 temas listos (claros y oscuros), colores editables uno por uno y 8 estilos de fondo, incluida una imagen propia con desenfoque y oscurecido.
 - **Export / import** de todos tus datos en JSON.
 
 ---
@@ -90,7 +91,7 @@ En el celular, abrí la URL y usá "Agregar a pantalla de inicio" para que quede
 app/
   layout.jsx        metadata y estilos globales
   page.jsx          shell: header, pestañas, estado compartido
-  globals.css       paleta oscura y clases base
+  globals.css       variables del tema, fondos y clases base
 components/
   Welcome.jsx       animación de entrada "Bienvenido Fabri"
   Timer.jsx         pomodoro, selección de grupo, notas
@@ -98,11 +99,13 @@ components/
   Sleep.jsx         registro y gráficos de sueño
   GroupsManager.jsx alta/edición de grupos, subgrupos y metas
   Settings.jsx      duraciones, alertas, export/import
+  Appearance.jsx    temas, colores y fondo (sección Apariencia)
   ui.jsx            piezas compartidas
 lib/
   db.js             capa de datos (Supabase o localStorage)
   supabase.js       cliente
   utils.js          fechas, formatos, correlación
+  theme.js          presets, derivación de paleta y aplicación del tema
 supabase-schema.sql esquema de la base
 ```
 

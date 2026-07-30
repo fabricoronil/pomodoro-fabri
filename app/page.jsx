@@ -16,6 +16,7 @@ import {
   DEFAULT_SETTINGS,
 } from "@/lib/db";
 import { fmtDur, periodRange, todayKey } from "@/lib/utils";
+import { applyTheme } from "@/lib/theme";
 
 const TABS = [
   { id: "timer", label: "Timer" },
@@ -65,6 +66,11 @@ export default function Page() {
       setReady(true);
     })();
   }, [refresh]);
+
+  // el tema vive en los ajustes: cada cambio se pinta en <html>
+  useEffect(() => {
+    applyTheme(settings.theme);
+  }, [settings.theme]);
 
   // agregados de la semana en curso
   const { todaySec, weekByGroup } = useMemo(() => {
@@ -124,7 +130,7 @@ export default function Page() {
               onClick={() => setTab(t.id)}
               className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition ${
                 tab === t.id
-                  ? "bg-accent text-white shadow-[0_10px_26px_-14px_rgba(139,92,246,1)]"
+                  ? "bg-accent text-onAccent shadow-[0_10px_26px_-14px_rgb(var(--c-accent))]"
                   : "text-muted hover:bg-surface2 hover:text-ink"
               }`}
             >

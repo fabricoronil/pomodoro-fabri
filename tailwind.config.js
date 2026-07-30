@@ -3,19 +3,24 @@ module.exports = {
   content: ["./app/**/*.{js,jsx}", "./components/**/*.{js,jsx}", "./lib/**/*.{js,jsx}"],
   theme: {
     extend: {
+      // Cada color apunta a una variable CSS con los canales RGB sueltos
+      // (ver lib/theme.js). Así el tema se puede cambiar en caliente sin perder
+      // la sintaxis de opacidad de Tailwind (bg-accent/15, border-line/50, …).
       colors: {
-        base: "#07080d",
-        surface: "#10131c",
-        surface2: "#171b27",
-        surface3: "#1f2534",
-        line: "#262c3d",
-        ink: "#e9ecf6",
-        muted: "#8e95ad",
-        accent: "#8b5cf6",
-        accent2: "#22d3ee",
-        focus: "#f0616d",
-        rest: "#34d399",
-        rest2: "#38bdf8",
+        base: "rgb(var(--c-base) / <alpha-value>)",
+        surface: "rgb(var(--c-surface) / <alpha-value>)",
+        surface2: "rgb(var(--c-surface2) / <alpha-value>)",
+        surface3: "rgb(var(--c-surface3) / <alpha-value>)",
+        line: "rgb(var(--c-line) / <alpha-value>)",
+        ink: "rgb(var(--c-ink) / <alpha-value>)",
+        muted: "rgb(var(--c-muted) / <alpha-value>)",
+        accent: "rgb(var(--c-accent) / <alpha-value>)",
+        accent2: "rgb(var(--c-accent2) / <alpha-value>)",
+        focus: "rgb(var(--c-focus) / <alpha-value>)",
+        rest: "rgb(var(--c-rest) / <alpha-value>)",
+        rest2: "rgb(var(--c-rest2) / <alpha-value>)",
+        warn: "rgb(var(--c-warn) / <alpha-value>)",
+        onAccent: "rgb(var(--c-onAccent) / <alpha-value>)",
       },
       keyframes: {
         fadeUp: {

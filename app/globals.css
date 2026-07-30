@@ -2,30 +2,144 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Valores por defecto (tema "Violeta"). lib/theme.js los reescribe en <html>
+   cuando el usuario cambia el tema desde Ajustes → Apariencia. */
 :root {
   color-scheme: dark;
+
+  --c-base: 7 8 13;
+  --c-surface: 18 20 26;
+  --c-surface2: 25 27 34;
+  --c-surface3: 33 36 44;
+  --c-line: 42 45 55;
+  --c-ink: 233 236 246;
+  --c-muted: 138 143 158;
+  --c-accent: 139 92 246;
+  --c-accent2: 34 211 238;
+  --c-focus: 240 97 109;
+  --c-rest: 52 211 153;
+  --c-rest2: 43 210 196;
+  --c-warn: 251 191 36;
+  --c-onAccent: 255 255 255;
+
+  --bg-intensity: 1;
+  /* los degradados se ven menos sobre fondos claros: se compensa acá */
+  --bg-a: 1;
+  --bg-image: none;
+  --bg-blur: 0px;
+  --bg-dim: 0.55;
+}
+
+/* El color de fondo va solo en <html>: si <body> también lo tuviera, taparía la
+   capa body::before (que pinta con z-index negativo, o sea antes que el fondo
+   de body) y no se vería ningún degradado. */
+html {
+  background-color: rgb(var(--c-base));
 }
 
 html,
 body {
-  background: #07080d;
-  color: #e9ecf6;
+  color: rgb(var(--c-ink));
 }
 
 body {
+  background-color: transparent;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
+  position: relative;
+}
+
+/* ------------------------------------------------------------------ fondos */
+
+/* Capa de fondo separada del <body> para poder desenfocar/oscurecer imágenes
+   sin afectar al contenido. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: var(--bg-intensity);
+  background-color: rgb(var(--c-base));
+  background-repeat: no-repeat;
+  transition: opacity 0.4s ease, background-color 0.4s ease;
+}
+
+/* Aurora — halos difusos en las esquinas (el fondo original) */
+html[data-bg="aurora"] body::before {
   background-image:
-    radial-gradient(900px 500px at 12% -8%, rgba(139, 92, 246, 0.16), transparent 60%),
-    radial-gradient(800px 480px at 92% 0%, rgba(34, 211, 238, 0.1), transparent 62%),
-    radial-gradient(700px 600px at 50% 110%, rgba(240, 97, 109, 0.07), transparent 60%);
-  background-attachment: fixed;
+    radial-gradient(900px 500px at 12% -8%, rgb(var(--c-accent) / calc(0.16 * var(--bg-a))), transparent 60%),
+    radial-gradient(800px 480px at 92% 0%, rgb(var(--c-accent2) / calc(0.1 * var(--bg-a))), transparent 62%),
+    radial-gradient(700px 600px at 50% 110%, rgb(var(--c-focus) / calc(0.07 * var(--bg-a))), transparent 60%);
+}
+
+/* Malla — degradado mesh más presente */
+html[data-bg="mesh"] body::before {
+  background-image:
+    radial-gradient(60% 55% at 8% 12%, rgb(var(--c-accent) / calc(0.3 * var(--bg-a))), transparent 60%),
+    radial-gradient(55% 50% at 95% 18%, rgb(var(--c-accent2) / calc(0.24 * var(--bg-a))), transparent 62%),
+    radial-gradient(50% 55% at 78% 95%, rgb(var(--c-focus) / calc(0.2 * var(--bg-a))), transparent 60%),
+    radial-gradient(55% 50% at 20% 88%, rgb(var(--c-rest) / calc(0.16 * var(--bg-a))), transparent 60%);
+}
+
+/* Haces — franjas diagonales suaves */
+html[data-bg="beams"] body::before {
+  background-image:
+    linear-gradient(115deg, rgb(var(--c-accent) / calc(0.22 * var(--bg-a))) 0%, transparent 38%),
+    linear-gradient(245deg, rgb(var(--c-accent2) / calc(0.18 * var(--bg-a))) 0%, transparent 42%),
+    radial-gradient(120% 80% at 50% 0%, rgb(var(--c-accent) / calc(0.1 * var(--bg-a))), transparent 65%);
+}
+
+/* Cuadrícula técnica */
+html[data-bg="grid"] body::before {
+  background-image:
+    linear-gradient(rgb(var(--c-ink) / calc(0.045 * var(--bg-a))) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--c-ink) / calc(0.045 * var(--bg-a))) 1px, transparent 1px),
+    radial-gradient(90% 70% at 50% 0%, rgb(var(--c-accent) / calc(0.16 * var(--bg-a))), transparent 65%);
+  background-size: 44px 44px, 44px 44px, 100% 100%;
+}
+
+/* Trama de puntos */
+html[data-bg="dots"] body::before {
+  background-image:
+    radial-gradient(rgb(var(--c-ink) / calc(0.09 * var(--bg-a))) 1px, transparent 1px),
+    radial-gradient(90% 70% at 50% 100%, rgb(var(--c-accent) / calc(0.12 * var(--bg-a))), transparent 65%);
+  background-size: 22px 22px, 100% 100%;
+}
+
+/* Viñeta — foco al centro */
+html[data-bg="vignette"] body::before {
+  background-image:
+    radial-gradient(120% 100% at 50% 40%, rgb(var(--c-accent) / calc(0.14 * var(--bg-a))), transparent 55%),
+    radial-gradient(100% 100% at 50% 50%, transparent 35%, rgb(0 0 0 / 0.5) 100%);
+}
+
+/* Sólido — solo el color de fondo */
+html[data-bg="solid"] body::before {
+  background-image: none;
+}
+
+/* Imagen propia */
+html[data-bg="image"] body::before {
+  background-image: var(--bg-image);
+  background-size: cover;
+  background-position: center;
+  filter: blur(var(--bg-blur));
+  transform: scale(1.06); /* tapa los bordes que come el blur */
+}
+html[data-bg="image"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: rgb(var(--c-base) / var(--bg-dim));
 }
 
 ::selection {
-  background: rgba(139, 92, 246, 0.35);
+  background: rgb(var(--c-accent) / 0.35);
 }
 
 ::-webkit-scrollbar {
@@ -33,30 +147,30 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0b0e16;
+  background: rgb(var(--c-surface));
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a3145;
+  background: rgb(var(--c-surface3));
   border-radius: 999px;
-  border: 2px solid #0b0e16;
+  border: 2px solid rgb(var(--c-surface));
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a4360;
+  background: rgb(var(--c-line));
 }
 
 @layer components {
   .card {
     @apply rounded-2xl border border-line/80 bg-surface/70 backdrop-blur-sm;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
-      0 18px 45px -30px rgba(0, 0, 0, 0.9);
+    box-shadow: 0 1px 0 rgb(var(--c-ink) / 0.04) inset,
+      0 18px 45px -30px rgb(0 0 0 / 0.9);
   }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
            transition-all duration-150 active:scale-[.97] disabled:opacity-40 disabled:pointer-events-none;
   }
   .btn-primary {
-    @apply btn bg-accent text-white hover:bg-accent/85;
-    box-shadow: 0 10px 30px -12px rgba(139, 92, 246, 0.9);
+    @apply btn bg-accent text-onAccent hover:bg-accent/85;
+    box-shadow: 0 10px 30px -12px rgb(var(--c-accent) / 0.9);
   }
   .btn-ghost {
     @apply btn border border-line bg-surface2/70 text-ink hover:bg-surface3;
@@ -89,9 +203,9 @@ body {
 }
 
 .recharts-cartesian-axis-tick text {
-  fill: #8e95ad;
+  fill: rgb(var(--c-muted));
   font-size: 11px;
 }
 .recharts-cartesian-grid line {
-  stroke: #1e2433;
+  stroke: rgb(var(--c-line));
 }

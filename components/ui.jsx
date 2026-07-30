@@ -13,7 +13,7 @@ export function Segmented({ value, onChange, options, className = "" }) {
           onClick={() => onChange(o.value)}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
             value === o.value
-              ? "bg-accent text-white shadow-[0_8px_20px_-10px_rgba(139,92,246,.9)]"
+              ? "bg-accent text-onAccent shadow-[0_8px_20px_-10px_rgb(var(--c-accent)/.9)]"
               : "text-muted hover:text-ink"
           }`}
         >
@@ -80,7 +80,8 @@ export function Empty({ children }) {
   );
 }
 
-export function Bar({ pct, color = "#8b5cf6", height = 8 }) {
+export function Bar({ pct, color, height = 8 }) {
+  color = color || "rgb(var(--c-accent))";
   return (
     <div
       className="w-full overflow-hidden rounded-full bg-surface3"
@@ -90,7 +91,7 @@ export function Bar({ pct, color = "#8b5cf6", height = 8 }) {
         className="h-full rounded-full transition-all duration-500"
         style={{
           width: `${Math.min(100, Math.max(0, pct))}%`,
-          background: `linear-gradient(90deg, ${color}, ${color}bb)`,
+          background: `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 72%, transparent))`,
         }}
       />
     </div>

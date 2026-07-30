@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { backend, exportAll, importAll, DEFAULT_SETTINGS } from "@/lib/db";
 import { todayKey } from "@/lib/utils";
+import Appearance from "./Appearance";
 
 function Row({ title, desc, children }) {
   return (
@@ -23,8 +24,8 @@ function Toggle({ on, onChange }) {
       className={`relative h-6 w-11 rounded-full transition ${on ? "bg-accent" : "bg-surface3"}`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
-          on ? "left-[22px]" : "left-0.5"
+        className={`absolute top-0.5 h-5 w-5 rounded-full transition-all ${
+          on ? "left-[22px] bg-onAccent" : "left-0.5 bg-ink/85"
         }`}
       />
     </button>
@@ -98,6 +99,8 @@ export default function Settings({ settings, setSettings, onChange }) {
         </Row>
       </div>
 
+      <Appearance theme={settings.theme} setTheme={(t) => set("theme", t)} />
+
       <div className="card p-5">
         <p className="label">Comportamiento</p>
         <Row title="Arrancar descansos solo" desc="al terminar un pomodoro">
@@ -124,7 +127,8 @@ export default function Settings({ settings, setSettings, onChange }) {
             step="0.05"
             value={settings.volume}
             onChange={(e) => set("volume", Number(e.target.value))}
-            className="w-28 accent-[#8b5cf6]"
+            className="w-28"
+            style={{ accentColor: "rgb(var(--c-accent))" }}
           />
         </Row>
         <Row title="Notificaciones del navegador" desc="aunque estés en otra pestaña">
@@ -146,7 +150,7 @@ export default function Settings({ settings, setSettings, onChange }) {
           className={`mb-4 rounded-xl border p-3 text-xs ${
             backend === "supabase"
               ? "border-rest/30 bg-rest/10 text-rest"
-              : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+              : "border-warn/40 bg-warn/10 text-warn"
           }`}
         >
           {backend === "supabase" ? (

@@ -31,14 +31,20 @@ import {
   toHours,
   toKey,
 } from "@/lib/utils";
+import { themeColor, themeColorA, useThemeVersion } from "@/lib/theme";
 import { Bar as ProgressBar, Delta, Empty, Segmented, Stat } from "./ui";
 
+// Recharts recibe colores como atributos SVG, así que necesitan ser hex reales
+// y no `var(--…)`: los leemos del tema en cada render.
 const tooltipStyle = {
-  background: "#141821",
-  border: "1px solid #262c3d",
+  background: "rgb(var(--c-surface))",
+  border: "1px solid rgb(var(--c-line))",
   borderRadius: 12,
   fontSize: 12,
+  color: "rgb(var(--c-ink))",
 };
+
+const legendStyle = () => ({ color: themeColor("muted"), fontSize: 12 });
 
 const PERIODS = [
   { value: "day", label: "Día" },
@@ -50,6 +56,7 @@ const PERIODS = [
 const DOW = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
 export default function Analytics({ groups, refreshKey, onChange }) {
+  useThemeVersion(); // los gráficos leen los colores del tema en cada render
   const [period, setPeriod] = useState("week");
   const [anchor, setAnchor] = useState(new Date());
   const [sessions, setSessions] = useState([]);
@@ -107,7 +114,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
     sessions.forEach((s) => {
       const r = rootOf(s.group_id);
       const id = r?.id || "none";
-      if (!m[id]) m[id] = { id, name: r?.name || "Sin grupo", color: r?.color || "#3a4360", sec: 0, count: 0 };
+      if (!m[id]) m[id] = { id, name: r?.name || "Sin grupo", color: r?.color || themeColor("surface3"), sec: 0, count: 0 };
       m[id].sec += s.duration_seconds;
       m[id].count++;
     });
@@ -123,7 +130,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
       const g = gmap[s.group_id];
       const id = s.group_id;
       const label = g?.parent_id ? g.name : "General";
-      if (!m[id]) m[id] = { id, name: label, color: g?.color || "#3a4360", sec: 0, count: 0 };
+      if (!m[id]) m[id] = { id, name: label, color: g?.color || themeColor("surface3"), sec: 0, count: 0 };
       m[id].sec += s.duration_seconds;
       m[id].count++;
     });
@@ -256,7 +263,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
               label="Mejor día"
               value={bestDay ? fmtDur(bestDay.sec) : "—"}
               sub={bestDay ? shortDate(fromKey(bestDay.key)) : ""}
-              accent="#34d399"
+              accent={themeColor("rest")}
             />
           </div>
 
@@ -278,11 +285,11 @@ export default function Analytics({ groups, refreshKey, onChange }) {
                     <XAxis dataKey="label" tickLine={false} axisLine={false} interval="preserveStartEnd" />
                     <YAxis tickLine={false} axisLine={false} unit="h" />
                     <Tooltip
-                      cursor={{ fill: "rgba(255,255,255,.04)" }}
+                      cursor={{ fill: themeColorA("ink", 0.05) }}
                       contentStyle={tooltipStyle}
                       formatter={(v, n, p) => [fmtDur(p.payload.sec), "Estudio"]}
                     />
-                    <RBar dataKey="horas" radius={[6, 6, 0, 0]} maxBarSize={40} fill="#8b5cf6" />
+                    <RBar dataKey="horas" radius={[6, 6, 0, 0]} maxBarSize={40} fill={themeColor("accent")} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -315,7 +322,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
                         <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtDur(v)} />
                         <Legend
                           verticalAlign="bottom"
-                          formatter={(v) => <span style={{ color: "#8e95ad", fontSize: 12 }}>{v}</span>}
+                          formatter={(v) => <span style={legendStyle()}>{v}</span>}
                         />
                       </PieChart>
                     </ResponsiveContainer>
@@ -399,7 +406,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
                 <div key={s.id} className="flex items-start gap-3 py-3 text-sm">
                   <span
                     className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ background: rootOf(s.group_id)?.color || "#3a4360" }}
+                    style={{ background: rootOf(s.group_id)?.color || themeColor("surface3") }}
                   />
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{fullName(s.group_id)}</p>
@@ -540,6 +547,7 @@ function RangeBox({ title, value, setValue, which, color, total, sessions, onPre
 }
 
 function Compare({ groups, refreshKey }) {
+  useThemeVersion();
   const thisWeek = periodRange("week", new Date());
   const lastWeek = periodRange("week", addDays(new Date(), -7));
 
@@ -606,7 +614,7 @@ function Compare({ groups, refreshKey }) {
           value={a}
           setValue={setA}
           which="a"
-          color="#8b5cf6"
+          color={themeColor("accent")}
           total={totA}
           sessions={da.length}
           onPreset={preset}
@@ -616,7 +624,7 @@ function Compare({ groups, refreshKey }) {
           value={b}
           setValue={setB}
           which="b"
-          color="#22d3ee"
+          color={themeColor("accent2")}
           total={totB}
           sessions={db.length}
           onPreset={preset}
@@ -630,7 +638,7 @@ function Compare({ groups, refreshKey }) {
             <span className="text-muted">Diferencia</span>
             <span
               className="tnum font-bold"
-              style={{ color: totA >= totB ? "#34d399" : "#f0616d" }}
+              style={{ color: themeColor(totA >= totB ? "rest" : "focus") }}
             >
               {totA >= totB ? "+" : "−"}
               {fmtDur(Math.abs(totA - totB))}
@@ -648,13 +656,13 @@ function Compare({ groups, refreshKey }) {
                 <XAxis dataKey="name" tickLine={false} axisLine={false} />
                 <YAxis tickLine={false} axisLine={false} unit="h" />
                 <Tooltip
-                  cursor={{ fill: "rgba(255,255,255,.04)" }}
+                  cursor={{ fill: themeColorA("ink", 0.05) }}
                   contentStyle={tooltipStyle}
                   formatter={(v, n, p) => [fmtDur(n === "A" ? p.payload.secA : p.payload.secB), n === "A" ? "Período A" : "Período B"]}
                 />
-                <Legend formatter={(v) => <span style={{ color: "#8e95ad", fontSize: 12 }}>{v === "A" ? "Período A" : "Período B"}</span>} />
-                <RBar dataKey="A" fill="#8b5cf6" radius={[6, 6, 0, 0]} maxBarSize={34} />
-                <RBar dataKey="B" fill="#22d3ee" radius={[6, 6, 0, 0]} maxBarSize={34} />
+                <Legend formatter={(v) => <span style={legendStyle()}>{v === "A" ? "Período A" : "Período B"}</span>} />
+                <RBar dataKey="A" fill={themeColor("accent")} radius={[6, 6, 0, 0]} maxBarSize={34} />
+                <RBar dataKey="B" fill={themeColor("accent2")} radius={[6, 6, 0, 0]} maxBarSize={34} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -667,6 +675,7 @@ function Compare({ groups, refreshKey }) {
 /* --------------------------------------------------------- SUEÑO VS ESTUDIO */
 
 function SleepVsStudy({ sleep, refreshKey }) {
+  useThemeVersion();
   const [span, setSpan] = useState(30);
   const [sessions, setSessions] = useState([]);
 
@@ -698,10 +707,10 @@ function SleepVsStudy({ sleep, refreshKey }) {
 
   const buckets = useMemo(() => {
     const defs = [
-      { label: "< 6 h", test: (h) => h < 6, color: "#f0616d" },
+      { label: "< 6 h", test: (h) => h < 6, color: themeColor("focus") },
       { label: "6 – 7 h", test: (h) => h >= 6 && h < 7, color: "#fb923c" },
       { label: "7 – 8 h", test: (h) => h >= 7 && h < 8, color: "#fbbf24" },
-      { label: "≥ 8 h", test: (h) => h >= 8, color: "#34d399" },
+      { label: "≥ 8 h", test: (h) => h >= 8, color: themeColor("rest") },
     ];
     return defs.map((d) => {
       const rows = paired.filter((p) => d.test(p.sueno));
@@ -752,7 +761,7 @@ function SleepVsStudy({ sleep, refreshKey }) {
           label="Correlación (r)"
           value={r === null ? "—" : r}
           sub={`${paired.length} días con ambos datos`}
-          accent={r === null ? undefined : r > 0.15 ? "#34d399" : r < -0.15 ? "#f0616d" : "#8e95ad"}
+          accent={r === null ? undefined : themeColor(r > 0.15 ? "rest" : r < -0.15 ? "focus" : "muted")}
         />
         <Stat
           label="Tu mejor franja de sueño"
@@ -779,24 +788,24 @@ function SleepVsStudy({ sleep, refreshKey }) {
                 <XAxis dataKey="label" tickLine={false} axisLine={false} interval="preserveStartEnd" />
                 <YAxis tickLine={false} axisLine={false} unit="h" />
                 <Tooltip
-                  cursor={{ fill: "rgba(255,255,255,.04)" }}
+                  cursor={{ fill: themeColorA("ink", 0.05) }}
                   contentStyle={tooltipStyle}
                   formatter={(v, n) => [v === null ? "—" : `${v} h`, n === "estudio" ? "Estudio" : "Sueño"]}
                 />
                 <Legend
                   formatter={(v) => (
-                    <span style={{ color: "#8e95ad", fontSize: 12 }}>
+                    <span style={legendStyle()}>
                       {v === "estudio" ? "Estudio" : "Sueño"}
                     </span>
                   )}
                 />
-                <RBar dataKey="estudio" fill="#8b5cf6" radius={[6, 6, 0, 0]} maxBarSize={26} />
+                <RBar dataKey="estudio" fill={themeColor("accent")} radius={[6, 6, 0, 0]} maxBarSize={26} />
                 <Line
                   type="monotone"
                   dataKey="sueno"
-                  stroke="#22d3ee"
+                  stroke={themeColor("accent2")}
                   strokeWidth={2.5}
-                  dot={{ r: 2.5, fill: "#22d3ee" }}
+                  dot={{ r: 2.5, fill: themeColor("accent2") }}
                   connectNulls
                 />
               </ComposedChart>

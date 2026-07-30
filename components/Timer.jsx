@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSession, updateSession } from "@/lib/db";
 import { fmtClock, fmtDur, todayKey } from "@/lib/utils";
+import { readableOn, themeColor, useThemeVersion } from "@/lib/theme";
 import { Modal, Bar } from "./ui";
 
 const TIMER_KEY = "pf.timer";
 
 const MODES = {
-  focus: { label: "Enfoque", color: "#f0616d", short: "Enfoque" },
-  short: { label: "Descanso", color: "#34d399", short: "Descanso" },
-  long: { label: "Descanso largo", color: "#38bdf8", short: "Pausa larga" },
+  focus: { label: "Enfoque", token: "focus", short: "Enfoque" },
+  short: { label: "Descanso", token: "rest", short: "Descanso" },
+  long: { label: "Descanso largo", token: "rest2", short: "Pausa larga" },
 };
 
 const PRESETS = {
@@ -430,7 +431,8 @@ export default function Timer({
   const weekSec = weekByGroup?.[groupId] || 0;
   const goalPct = goalMin ? (weekSec / 60 / goalMin) * 100 : 0;
 
-  const color = MODES[mode].color;
+  useThemeVersion(); // repinta el reloj cuando cambian los colores
+  const color = themeColor(MODES[mode].token);
   const R = 132;
   const C = 2 * Math.PI * R;
   const clock = fmtClock(countUp ? elapsed : remaining);
@@ -457,7 +459,7 @@ export default function Timer({
         className="tnum select-none font-bold leading-none tracking-tight"
         style={{
           fontSize: "min(26vw, 34vh)",
-          color: running ? "#e9ecf6" : color,
+          color: running ? "rgb(var(--c-ink))" : color,
           textShadow: `0 0 90px ${color}44`,
         }}
       >
@@ -476,8 +478,8 @@ export default function Timer({
         ) : (
           <button
             onClick={start}
-            className="btn px-8 py-3 text-base font-bold text-white"
-            style={{ background: color }}
+            className="btn px-8 py-3 text-base font-bold"
+            style={{ background: color, color: readableOn(color) }}
           >
             {countUp ? (elapsed > 0 ? "Seguir" : "Iniciar") : remaining < duration ? "Seguir" : "Iniciar"}
           </button>
@@ -561,7 +563,14 @@ export default function Timer({
 
             <div className="relative mx-auto mt-7 flex h-[300px] w-[300px] items-center justify-center">
               <svg width="300" height="300" className="absolute -rotate-90">
-                <circle cx="150" cy="150" r={R} fill="none" stroke="#1c2131" strokeWidth="12" />
+                <circle
+                  cx="150"
+                  cy="150"
+                  r={R}
+                  fill="none"
+                  stroke="rgb(var(--c-surface3))"
+                  strokeWidth="12"
+                />
                 <circle
                   cx="150"
                   cy="150"
@@ -631,7 +640,10 @@ export default function Timer({
                         key={i}
                         className="h-1.5 w-1.5 rounded-full transition-colors"
                         style={{
-                          background: i < cycle % Math.max(1, settings.longEvery) ? color : "#2a3145",
+                          background:
+                            i < cycle % Math.max(1, settings.longEvery)
+                              ? color
+                              : "rgb(var(--c-surface3))",
                         }}
                       />
                     ))}
@@ -674,8 +686,12 @@ export default function Timer({
               ) : (
                 <button
                   onClick={start}
-                  className="btn min-w-[130px] py-3 text-base font-bold text-white"
-                  style={{ background: color, boxShadow: `0 12px 34px -14px ${color}` }}
+                  className="btn min-w-[130px] py-3 text-base font-bold"
+                  style={{
+                    background: color,
+                    color: readableOn(color),
+                    boxShadow: `0 12px 34px -14px ${color}`,
+                  }}
                 >
                   {countUp
                     ? elapsed > 0
@@ -773,7 +789,7 @@ export default function Timer({
                   {fmtDur(weekSec)} / {Math.round((goalMin / 60) * 10) / 10}h
                 </span>
               </div>
-              <Bar pct={goalPct} color={parent?.color || "#8b5cf6"} />
+              <Bar pct={goalPct} color={parent?.color || "rgb(var(--c-accent))"} />
               <p className="mt-1.5 text-[11px] text-muted">
                 {goalPct >= 100
                   ? "Meta cumplida. Crack."
