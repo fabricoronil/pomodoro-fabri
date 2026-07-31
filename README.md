@@ -1,6 +1,7 @@
 # Pomodoro
 
-Timer pomodoro con analítica de estudio, grupos/subgrupos, metas semanales y control de sueño.
+Timer pomodoro con analítica de **todo tu tiempo** —estudio, gimnasio, despeje—, grupos/subgrupos,
+metas y límites, y control de sueño.
 Next.js 14 + Tailwind + Supabase. Pensado para hostear en Vercel y abrir desde cualquier dispositivo.
 
 ---
@@ -10,13 +11,15 @@ Next.js 14 + Tailwind + Supabase. Pensado para hostear en Vercel y abrir desde c
 - **Cuenta propia**: registro e inicio de sesión con nombre, email y contraseña (o directo con Google). Cada cuenta ve solo sus datos, y la app te saluda por tu nombre. Se puede cambiar después en *Ajustes → Cuenta*.
 - **Timer que no se corta**: el pomodoro vive en tu cuenta, no en el navegador. Lo arrancás en la compu, abrís el celular y sigue exactamente igual. Podés cerrar la web: al volver, si el bloque ya había terminado, la sesión queda guardada sola. **Solo se detiene si lo cancelás.**
 - **Timer**: enfoque / descanso corto / descanso largo, configurables. Sigue corriendo si refrescás la pestaña.
-- **Grupos y subgrupos**: cada cuenta nueva arranca con tres grupos genéricos (*Estudio*, *Trabajo*, *Personal*) para poder tirar el primer pomodoro sin configurar nada. Podés renombrarlos, borrarlos y colgarles los subgrupos que quieras.
+- **Grupos y subgrupos**: cada cuenta nueva arranca con cuatro grupos genéricos (*Estudio*, *Trabajo*, *Gimnasio*, *Despeje*) para poder tirar el primer pomodoro sin configurar nada. Podés renombrarlos, borrarlos y colgarles los subgrupos que quieras.
+- **Tipos de actividad**: cada grupo es **productivo** (estudio, trabajo), **cuerpo** (gym, deporte) o **despeje** (juegos, series, ocio). El total del día es el de todo junto, y abajo se abre en cuánto fue cada cosa.
+- **Metas y límites**: por grupo, diarios y/o semanales. Una **meta** es un mínimo a alcanzar (se pone verde al cumplirla) y un **límite** un máximo a no pasar: avisa en ámbar cuando estás cerca y en rojo cuando te pasaste. Así el gimnasio se empuja hacia arriba y las horas de juego se mantienen a raya.
+- **Cargar tiempo a mano**: no todo pasa frente a la compu. Desde el timer o desde la analítica podés registrar "hoy jugué 1h 30m" o "fui al gym 45m", con día, hora de fin y nota.
 - **Notas por sesión**: al terminar un pomodoro te pregunta qué hiciste.
-- **Metas semanales** por grupo, con barra de progreso.
 - **Analítica**: día / semana / mes / año, con navegación entre períodos y comparación automática contra el período anterior.
 - **Comparar fechas**: dos rangos libres (A vs B) con presets rápidos.
 - **Sueño**: a qué hora te acostaste y te despertaste, promedio de 7 días, deuda de sueño y racha.
-- **Sueño vs productividad**: correlación de Pearson + cuántas horas estudiás según cuánto dormiste.
+- **Sueño vs productividad**: correlación de Pearson + cuántas horas productivas rendís según cuánto dormiste (el despeje y el gimnasio no entran en esa cuenta).
 - **Sonido y notificaciones** del navegador al terminar cada bloque.
 - **Avisos con la web cerrada**: notificaciones push reales. Arrancás un pomodoro, cerrás todo, y el celular te avisa igual cuando termina. Se activa por dispositivo desde *Ajustes*.
 - **Ajustes sincronizados**: duraciones, comportamiento, alertas y tema viven en tu cuenta, no en el navegador.
@@ -31,6 +34,12 @@ Next.js 14 + Tailwind + Supabase. Pensado para hostear en Vercel y abrir desde c
 2. En el menú lateral: **SQL Editor → New query**.
 3. Copiá y pegá **todo** el contenido de `supabase-schema.sql` y apretá **Run**.
    (Se puede correr de nuevo sin romper nada: sirve para una base nueva y para actualizar una vieja.)
+
+   > **Si tu base ya estaba andando**, volvé a correrlo para que aparezcan los tipos de actividad y
+   > los límites (`groups.kind`, `groups.goal_type`, `groups.daily_goal_minutes`). Si preferís tocar
+   > lo mínimo, corré solo `supabase/migrations/20260731120000_group_kinds_and_limits.sql`.
+   > Hasta que lo hagas la app sigue funcionando: detecta las columnas que faltan y las saltea,
+   > tratando todo como "productivo" con meta.
 4. **Authentication → Providers → Email**: dejalo activado.
    Para uso personal conviene **desactivar "Confirm email"**, así entrás sin pasar por el correo.
 5. **Database → Replication** (o *Realtime*): asegurate de que la tabla `active_timer` esté publicada.
@@ -229,9 +238,10 @@ components/
   Welcome.jsx       animación de entrada "Bienvenido <nombre>"
   Auth.jsx          registro / inicio de sesión
   Timer.jsx         pomodoro sincronizado, selección de grupo, notas
-  Analytics.jsx     resumen, comparar fechas, sueño vs estudio, sesiones
+  LogTime.jsx       cargar tiempo a mano (gym, juegos, lo que pasó sin el timer)
+  Analytics.jsx     resumen, comparar fechas, sueño vs productividad, sesiones
   Sleep.jsx         registro y gráficos de sueño
-  GroupsManager.jsx alta/edición de grupos, subgrupos y metas
+  GroupsManager.jsx alta/edición de grupos, subgrupos, metas y límites
   Settings.jsx      duraciones, alertas, export/import
   PushCard.jsx      "avisarme aunque la web esté cerrada"
   Appearance.jsx    temas, colores y fondo (sección Apariencia)
@@ -243,6 +253,7 @@ lib/
   timerSync.js      el pomodoro en curso: nube + copia local
   push.js           suscripción a los avisos push (API del navegador, sin dependencias)
   utils.js          fechas, formatos, correlación
+  kinds.js          tipos de actividad y objetivos (meta / límite)
   theme.js          presets, derivación de paleta y aplicación del tema
 public/
   sw.js             service worker: recibe el push con la web cerrada

@@ -11,6 +11,7 @@ import {
   useSignOut,
 } from "@/lib/auth";
 import { todayKey } from "@/lib/utils";
+import { NumField } from "./ui";
 import Appearance from "./Appearance";
 import PushCard from "./PushCard";
 
@@ -43,14 +44,7 @@ function Toggle({ on, onChange }) {
 
 function Num({ value, onChange, min = 1, max = 600 }) {
   return (
-    <input
-      type="number"
-      min={min}
-      max={max}
-      value={value}
-      onChange={(e) => onChange(Math.max(min, Math.min(max, Number(e.target.value) || min)))}
-      className="field w-20 text-center"
-    />
+    <NumField value={value} onChange={onChange} min={min} max={max} className="w-32" />
   );
 }
 
@@ -247,22 +241,18 @@ export default function Settings({ settings, setSettings, onChange, email, userI
       <div className="card p-5">
         <p className="label">Metas</p>
         <p className="-mt-1 mb-2 text-xs text-muted">
-          Las metas semanales de estudio se ponen por grupo, en la pestaña Grupos.
+          Las metas y los límites (diarios y semanales) se ponen por grupo, en la
+          pestaña Grupos.
         </p>
         <Row title="Meta de sueño" desc="horas por noche · la línea del gráfico y la deuda salen de acá">
-          <input
-            type="number"
+          <NumField
+            value={settings.sleepGoalHours}
+            onChange={(v) => set("sleepGoalHours", v)}
             min={4}
             max={14}
             step={0.5}
-            value={settings.sleepGoalHours}
-            onChange={(e) =>
-              set(
-                "sleepGoalHours",
-                Math.max(4, Math.min(14, Number(e.target.value) || 8))
-              )
-            }
-            className="field w-20 text-center"
+            suffix="h"
+            className="w-32"
           />
         </Row>
       </div>

@@ -15,7 +15,10 @@ import {
   subscribeTimer,
   writeMirror,
 } from "@/lib/timerSync";
-import { Modal, Bar } from "./ui";
+import { dailyGoalMin, goalTypeOf, weeklyGoalMin } from "@/lib/kinds";
+import { Modal, GoalLine } from "./ui";
+import GroupPicker from "./GroupPicker";
+import LogTime from "./LogTime";
 
 const MODES = {
   focus: { label: "Enfoque", token: "focus", short: "Enfoque" },
@@ -77,6 +80,7 @@ export default function Timer({
   onSaved,
   todaySec,
   weekByGroup,
+  todayByGroup,
   userId = null,
   name = "",
 }) {
@@ -99,6 +103,8 @@ export default function Timer({
   const [draftMin, setDraftMin] = useState("");
   const [fs, setFs] = useState(false);
   const [idle, setIdle] = useState(false);
+  const [logging, setLogging] = useState(false);
+  const [picking, setPicking] = useState(false);
   const shellRef = useRef(null);
   const idleTimer = useRef(null);
   const claiming = useRef(false);
@@ -619,12 +625,14 @@ export default function Timer({
     };
   }, [fs]);
 
-  // ---------------------------------------------------------- meta semanal
+  // ------------------------------------------------- objetivos del grupo activo
 
   const parent = parents.find((g) => g.id === groupId);
-  const goalMin = parent?.weekly_goal_minutes || 0;
+  const goalType = goalTypeOf(parent);
+  const weekGoalMin = weeklyGoalMin(parent);
+  const dayGoalMin = dailyGoalMin(parent);
   const weekSec = weekByGroup?.[groupId] || 0;
-  const goalPct = goalMin ? (weekSec / 60 / goalMin) * 100 : 0;
+  const daySec = todayByGroup?.[groupId] || 0;
 
   useThemeVersion(); // repinta el reloj cuando cambian los colores
   const color = themeColor(MODES[t.mode].token);
@@ -937,19 +945,15 @@ export default function Timer({
       {/* ---------------- panel lateral ---------------- */}
       <div className={`flex flex-col gap-4 ${fs ? "hidden" : ""}`}>
         <div className="card p-5">
-          <p className="label">¿En qué estás trabajando?</p>
-          <select
-            className="field"
+          <p className="label">¿A qué le estás metiendo?</p>
+          <GroupPicker
+            groups={groups}
             value={groupId}
-            onChange={(e) => commit({ group_id: e.target.value || null, sub_group_id: null })}
-          >
-            {parents.length === 0 && <option value="">Creá un grupo primero</option>}
-            {parents.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => commit({ group_id: id || null, sub_group_id: null })}
+            onOpenChange={setPicking}
+            timeByGroup={weekByGroup}
+            timeLabel="sem"
+          />
 
           {subs.length > 0 && (
             <>
@@ -967,6 +971,10 @@ export default function Timer({
                     onClick={() => commit({ group_id: groupId || null, sub_group_id: s.id })}
                     className={`chip ${subId === s.id ? "chip-on" : ""}`}
                   >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: s.color || parent?.color }}
+                    />
                     {s.name}
                   </button>
                 ))}
@@ -977,25 +985,33 @@ export default function Timer({
 
         <div className="card p-5">
           <div className="flex items-baseline justify-between">
-            <p className="label mb-0">Hoy</p>
+            <p className="label mb-0">Hoy le metiste</p>
             <p className="tnum text-xl font-bold">{fmtDur(todaySec || 0)}</p>
           </div>
-          {goalMin > 0 && (
-            <div className="mt-4">
-              <div className="mb-1.5 flex items-baseline justify-between text-xs">
-                <span className="text-muted">Meta semanal · {parent?.name}</span>
-                <span className="tnum font-semibold">
-                  {fmtDur(weekSec)} / {Math.round((goalMin / 60) * 10) / 10}h
-                </span>
-              </div>
-              <Bar pct={goalPct} color={parent?.color || "rgb(var(--c-accent))"} />
-              <p className="mt-1.5 text-[11px] text-muted">
-                {goalPct >= 100
-                  ? "Meta cumplida. Crack."
-                  : `Te faltan ${fmtDur(goalMin * 60 - weekSec)} esta semana`}
-              </p>
+
+          {(dayGoalMin > 0 || weekGoalMin > 0) && (
+            <div className="mt-4 space-y-3 border-t border-line/60 pt-4">
+              <p className="text-[11px] uppercase tracking-[.1em] text-muted">{parent?.name}</p>
+              {dayGoalMin > 0 && (
+                <GoalLine label="Hoy" sec={daySec} goalMin={dayGoalMin} type={goalType} />
+              )}
+              {weekGoalMin > 0 && (
+                <GoalLine
+                  label="Esta semana"
+                  sec={weekSec}
+                  goalMin={weekGoalMin}
+                  type={goalType}
+                />
+              )}
             </div>
           )}
+
+          <button onClick={() => setLogging(true)} className="btn-quiet mt-4 w-full text-sm">
+            + Cargar tiempo a mano
+          </button>
+          <p className="mt-1.5 text-[11px] leading-snug text-muted">
+            Para lo que hiciste sin el timer: gimnasio, una partida, una salida.
+          </p>
         </div>
 
         {userId && (
@@ -1041,11 +1057,19 @@ export default function Timer({
         </div>
       </Modal>
 
+      <LogTime
+        groups={groups}
+        open={logging}
+        onClose={() => setLogging(false)}
+        onSaved={onSaved}
+        defaultGroupId={groupId || null}
+      />
+
       <KeyBinds
         onSpace={() => (running ? pause() : start())}
         onR={cancel}
         onF={toggleFs}
-        disabled={editing || !!noteFor}
+        disabled={editing || !!noteFor || logging || picking}
       />
     </div>
   );

@@ -2,7 +2,8 @@ import "./globals.css";
 
 export const metadata = {
   title: "Pomodoro",
-  description: "Timer pomodoro con analítica de estudio y control de sueño",
+  description:
+    "Timer pomodoro con analítica de tu tiempo (estudio, gimnasio, despeje) y control de sueño",
   manifest: "/manifest.json",
 };
 

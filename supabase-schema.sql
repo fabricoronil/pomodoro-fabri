@@ -16,13 +16,22 @@
 create extension if not exists "pgcrypto";
 
 -- ------------------------------------------------------------- GRUPOS
+--  kind      : qué clase de tiempo es. 'productivo' (estudio, trabajo),
+--              'cuerpo' (gym, deporte) o 'despeje' (juegos, series, ocio).
+--              Vive en el grupo raíz; los subgrupos heredan el del padre.
+--  goal_type : 'meta' es un mínimo a alcanzar y 'limite' un máximo a no pasar.
+--              Así el mismo objetivo sirve para empujar el gimnasio hacia
+--              arriba y para tener a raya las horas de juego.
 create table if not exists public.groups (
   id                  uuid primary key default gen_random_uuid(),
   user_id             uuid references auth.users(id) on delete cascade default auth.uid(),
   name                text not null,
   color               text not null default '#8b5cf6',
   parent_id           uuid references public.groups(id) on delete cascade,
+  kind                text not null default 'productivo',
+  goal_type           text not null default 'meta',
   weekly_goal_minutes integer not null default 0,
+  daily_goal_minutes  integer not null default 0,
   archived            boolean not null default false,
   sort_order          integer not null default 0,
   created_at          timestamptz not null default now()
@@ -30,15 +39,39 @@ create table if not exists public.groups (
 alter table public.groups
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table public.groups alter column user_id set default auth.uid();
+alter table public.groups
+  add column if not exists kind text not null default 'productivo';
+alter table public.groups
+  add column if not exists goal_type text not null default 'meta';
+alter table public.groups
+  add column if not exists daily_goal_minutes integer not null default 0;
 create index if not exists groups_parent_idx on public.groups(parent_id);
 create index if not exists groups_user_idx   on public.groups(user_id);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.groups'::regclass and conname = 'groups_kind_check'
+  ) then
+    alter table public.groups
+      add constraint groups_kind_check check (kind in ('productivo', 'cuerpo', 'despeje'));
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.groups'::regclass and conname = 'groups_goal_type_check'
+  ) then
+    alter table public.groups
+      add constraint groups_goal_type_check check (goal_type in ('meta', 'limite'));
+  end if;
+end $$;
 
 -- ----------------------------------------------------------- SESIONES
 create table if not exists public.sessions (
   id               uuid primary key default gen_random_uuid(),
   user_id          uuid references auth.users(id) on delete cascade default auth.uid(),
   group_id         uuid references public.groups(id) on delete set null,
-  mode             text not null default 'focus',   -- focus | short | long
+  mode             text not null default 'focus',   -- focus | short | long | manual
   started_at       timestamptz not null,
   ended_at         timestamptz not null,
   duration_seconds integer not null,

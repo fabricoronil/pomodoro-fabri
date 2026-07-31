@@ -178,17 +178,72 @@ html[data-bg="image"] body::after {
   .btn-quiet {
     @apply btn text-muted hover:text-ink hover:bg-surface2;
   }
+  /* ------------------------------------------------------------- campos
+     El foco no usa `ring` de Tailwind: la sombra se arma a mano para poder
+     combinar el halo del acento con el relieve interno sin pisarse. */
   .field {
-    @apply w-full rounded-xl border border-line bg-surface2/80 px-3.5 py-2.5 text-sm text-ink
-           outline-none transition placeholder:text-muted/70
-           focus:border-accent/70 focus:ring-2 focus:ring-accent/25;
+    @apply w-full rounded-xl border border-line/80 bg-surface2/60 px-3.5 py-2.5 text-sm text-ink
+           outline-none transition-all duration-150 placeholder:text-muted/60;
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.16);
+  }
+  .field:hover:not(:disabled) {
+    @apply border-line bg-surface2/90;
+  }
+  .field:focus,
+  .field:focus-within,
+  .field:focus-visible {
+    @apply border-accent/70 bg-surface2;
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.08),
+      0 0 0 3px rgb(var(--c-accent) / 0.18);
+  }
+  .field:disabled {
+    @apply opacity-50;
+  }
+  /* fecha y hora: el ícono nativo aparece cuando lo vas a usar */
+  .field::-webkit-calendar-picker-indicator {
+    opacity: 0.45;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .field:hover::-webkit-calendar-picker-indicator,
+  .field:focus::-webkit-calendar-picker-indicator {
+    opacity: 0.9;
+  }
+  /* los números van con los +/− de NumField, no con las flechitas del sistema
+     (el segundo selector es para el input de adentro del propio NumField) */
+  .field::-webkit-outer-spin-button,
+  .field::-webkit-inner-spin-button,
+  .field input::-webkit-outer-spin-button,
+  .field input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .field[type="number"],
+  .field input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  /* botoncito −/+ de los campos numéricos */
+  .stepper {
+    @apply flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg text-base
+           font-semibold leading-none text-muted transition hover:bg-surface3 hover:text-ink
+           active:scale-90 disabled:pointer-events-none disabled:opacity-30;
+  }
+  /* fila de un menú desplegable (selector de grupo) */
+  .opt {
+    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm
+           text-muted transition hover:bg-surface2 hover:text-ink;
+  }
+  .opt-on {
+    @apply bg-accent/15 text-ink;
   }
   .label {
     @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-[.12em] text-muted;
   }
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface2/70
-           px-3 py-1.5 text-xs font-medium text-muted transition hover:text-ink;
+           px-3 py-1.5 text-xs font-medium text-muted transition
+           hover:border-line hover:bg-surface3/70 hover:text-ink active:scale-[.97];
   }
   .chip-on {
     @apply border-accent/60 bg-accent/15 text-ink;

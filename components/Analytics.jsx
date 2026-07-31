@@ -31,7 +31,18 @@ import {
   toKey,
 } from "@/lib/utils";
 import { themeColor, themeColorA, useThemeVersion } from "@/lib/theme";
-import { Bar as ProgressBar, Delta, Empty, Segmented, Stat } from "./ui";
+import {
+  KINDS,
+  KIND_ORDER,
+  dailyGoalMin,
+  goalTypeOf,
+  hasGoal,
+  kindMeta,
+  kindOf,
+  weeklyGoalMin,
+} from "@/lib/kinds";
+import { Bar as ProgressBar, Delta, Empty, GoalLine, Segmented, Stat } from "./ui";
+import LogTime from "./LogTime";
 
 // Recharts recibe colores como atributos SVG, así que necesitan ser hex reales
 // y no `var(--…)`: los leemos del tema en cada render.
@@ -57,22 +68,26 @@ const DOW = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 // Vistas secundarias: viven detrás del resumen para no ensuciar lo importante.
 const EXTRAS = [
   { id: "sesiones", label: "Ver sesión por sesión" },
-  { id: "sueno", label: "Sueño vs. estudio" },
+  { id: "sueno", label: "Sueño vs. rendimiento" },
   { id: "comparar", label: "Comparar dos fechas" },
 ];
 
 const EXTRA_TITLES = {
   sesiones: "Sesión por sesión",
-  sueno: "Sueño vs. estudio",
+  sueno: "Sueño vs. rendimiento",
   comparar: "Comparar dos fechas",
 };
 
-/** Título del bloque principal, en criollo según el período que estés mirando */
+/**
+ * Título del bloque principal, en criollo según el período que estés mirando.
+ * A propósito no dice "estudiaste": acá adentro entra todo lo que medís, desde
+ * un parcial hasta el gimnasio o la tarde de juegos.
+ */
 function heroTitle(period, isCurrent) {
-  if (period === "day") return isCurrent ? "Hoy estudiaste" : "Ese día estudiaste";
-  if (period === "week") return isCurrent ? "Esta semana estudiaste" : "Esa semana estudiaste";
-  if (period === "month") return isCurrent ? "Este mes estudiaste" : "Ese mes estudiaste";
-  return isCurrent ? "Este año estudiaste" : "Ese año estudiaste";
+  if (period === "day") return isCurrent ? "Hoy le metiste" : "Ese día le metiste";
+  if (period === "week") return isCurrent ? "Esta semana le metiste" : "Esa semana le metiste";
+  if (period === "month") return isCurrent ? "Este mes le metiste" : "Ese mes le metiste";
+  return isCurrent ? "Este año le metiste" : "Ese año le metiste";
 }
 
 const chartTitle = (period) =>
@@ -131,6 +146,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
   const [sleep, setSleep] = useState([]);
   const [tab, setTab] = useState("resumen");
   const [loading, setLoading] = useState(true);
+  const [logging, setLogging] = useState(false);
 
   const range = useMemo(() => periodRange(period, anchor), [period, anchor]);
 
@@ -180,6 +196,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
           id: rid,
           name: root?.name || "Sin grupo",
           color: root?.color || themeColor("surface3"),
+          kind: kindOf(root),
           sec: 0,
           count: 0,
           kids: {},
@@ -208,6 +225,15 @@ export default function Analytics({ groups, refreshKey, onChange }) {
       }))
       .sort((a, b) => b.sec - a.sec);
   }, [sessions, gmap]);
+
+  // ---- el mismo total, partido por tipo: cuánto fue productivo y cuánto no ----
+  const byKind = useMemo(() => {
+    const m = {};
+    breakdown.forEach((r) => {
+      m[r.kind] = (m[r.kind] || 0) + r.sec;
+    });
+    return KIND_ORDER.filter((k) => m[k] > 0).map((k) => ({ ...KINDS[k], sec: m[k] }));
+  }, [breakdown]);
 
   // ------------------------- datos sueltos del período -------------------------
   const facts = useMemo(() => {
@@ -357,6 +383,30 @@ export default function Analytics({ groups, refreshKey, onChange }) {
             >
               <BigDur sec={totalSec} />
             </p>
+
+            {/* de dónde sale ese total: productivo, cuerpo, despeje */}
+            {byKind.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
+                {byKind.map((k) => (
+                  <div key={k.id} className="flex items-baseline gap-2">
+                    <span
+                      className="h-2 w-2 translate-y-[-1px] rounded-full"
+                      style={{ background: themeColor(k.token) }}
+                    />
+                    <span className="text-sm text-muted">
+                      {k.emoji} {k.label}
+                    </span>
+                    <span className="tnum text-sm font-bold">{fmtDur(k.sec)}</span>
+                    {totalSec > 0 && (
+                      <span className="text-[11px] text-muted">
+                        {Math.round((k.sec / totalSec) * 100)}%
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {facts.length > 0 && (
               <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3 border-t border-line/60 pt-4">
                 {facts.map((f) => (
@@ -371,11 +421,16 @@ export default function Analytics({ groups, refreshKey, onChange }) {
 
           {/* ---------- 2. en qué se fue ese tiempo ---------- */}
           <div className="card p-5">
-            <div className="mb-4 flex items-baseline justify-between gap-3">
+            <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
               <p className="label mb-0">En qué le metiste tiempo</p>
-              {breakdown.length > 1 && (
-                <span className="text-xs text-muted">{breakdown.length} grupos</span>
-              )}
+              <div className="flex items-baseline gap-3">
+                {breakdown.length > 1 && (
+                  <span className="text-xs text-muted">{breakdown.length} grupos</span>
+                )}
+                <button onClick={() => setLogging(true)} className="chip text-[11px]">
+                  + Cargar tiempo a mano
+                </button>
+              </div>
             </div>
 
             {loading ? (
@@ -383,7 +438,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
             ) : breakdown.length === 0 ? (
               <Empty>
                 {period === "day" && isCurrent
-                  ? "Todavía no registraste tiempo hoy. Arrancá un pomodoro y aparece acá."
+                  ? "Todavía no registraste tiempo hoy. Arrancá un pomodoro —o cargá a mano lo que ya hiciste— y aparece acá."
                   : "No hay sesiones en este período."}
               </Empty>
             ) : (
@@ -443,7 +498,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
                     <Tooltip
                       cursor={{ fill: themeColorA("ink", 0.05) }}
                       contentStyle={tooltipStyle}
-                      formatter={(v, n, p) => [fmtDur(p.payload.sec), "Estudio"]}
+                      formatter={(v, n, p) => [fmtDur(p.payload.sec), "Tiempo"]}
                     />
                     <RBar dataKey="horas" radius={[4, 4, 0, 0]} maxBarSize={36}>
                       {series.map((d, i) => (
@@ -485,9 +540,18 @@ export default function Analytics({ groups, refreshKey, onChange }) {
         />
       )}
 
-      {tab === "sueno" && <SleepVsStudy sleep={sleep} refreshKey={refreshKey} />}
+      {tab === "sueno" && (
+        <SleepVsStudy sleep={sleep} groups={groups} refreshKey={refreshKey} />
+      )}
 
       {tab === "comparar" && <Compare groups={groups} refreshKey={refreshKey} />}
+
+      <LogTime
+        groups={groups}
+        open={logging}
+        onClose={() => setLogging(false)}
+        onSaved={onChange}
+      />
     </div>
   );
 }
@@ -496,6 +560,7 @@ export default function Analytics({ groups, refreshKey, onChange }) {
 
 function GroupRow({ group, total }) {
   const pct = total ? (group.sec / total) * 100 : 0;
+  const kind = KINDS[group.kind] || KINDS.productivo;
   // "General" solo cuando es el único hijo: no aporta nada desglosarlo
   const kids =
     group.kids.length === 1 && group.kids[0].id === "_general" ? [] : group.kids;
@@ -517,7 +582,7 @@ function GroupRow({ group, total }) {
         <ProgressBar pct={pct} color={group.color} height={6} />
       </div>
       <p className="mt-1.5 text-xs text-muted">
-        {Math.round(pct)}% de tu tiempo · {group.count}{" "}
+        {kind.emoji} {kind.label} · {Math.round(pct)}% de tu tiempo · {group.count}{" "}
         {group.count === 1 ? "sesión" : "sesiones"}
       </p>
 
@@ -542,47 +607,79 @@ function GroupRow({ group, total }) {
 
 /* ------------------------------------------------------------------ METAS */
 
+/**
+ * Metas y límites.
+ *
+ * Siempre mira la semana en curso y el día de hoy, sin importar qué período
+ * estés viendo arriba: es el tablero de "¿cómo vengo?", no del pasado.
+ */
 function GoalsPanel({ groups }) {
-  const [weekSec, setWeekSec] = useState({});
-  const withGoal = groups.filter((g) => !g.parent_id && (g.weekly_goal_minutes || 0) > 0);
+  const [sec, setSec] = useState({ week: {}, today: {} });
+  const withGoal = groups.filter((g) => !g.parent_id && hasGoal(g));
 
   useEffect(() => {
+    if (!withGoal.length) return;
     const r = periodRange("week", new Date());
+    const tk = todayKey();
     listSessions(r.startKey, r.endKey).then((ss) => {
       const gmap = Object.fromEntries(groups.map((g) => [g.id, g]));
-      const m = {};
+      const week = {};
+      const today = {};
       ss.forEach((s) => {
         const g = gmap[s.group_id];
         const rootId = g?.parent_id || g?.id;
-        if (rootId) m[rootId] = (m[rootId] || 0) + s.duration_seconds;
+        if (!rootId) return;
+        week[rootId] = (week[rootId] || 0) + s.duration_seconds;
+        if (s.local_date === tk) today[rootId] = (today[rootId] || 0) + s.duration_seconds;
       });
-      setWeekSec(m);
+      setSec({ week, today });
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groups]);
 
   if (!withGoal.length) return null;
 
+  const anyLimit = withGoal.some((g) => goalTypeOf(g) === "limite");
+
   return (
     <div className="card p-5">
-      <p className="label">Metas de esta semana</p>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <p className="label">{anyLimit ? "Metas y límites" : "Metas de esta semana"}</p>
+      <div className="grid gap-5 sm:grid-cols-2">
         {withGoal.map((g) => {
-          const sec = weekSec[g.id] || 0;
-          const pct = (sec / 60 / g.weekly_goal_minutes) * 100;
+          const type = goalTypeOf(g);
+          const kind = kindMeta(g);
+          const day = dailyGoalMin(g);
+          const week = weeklyGoalMin(g);
           return (
             <div key={g.id}>
-              <div className="mb-1.5 flex items-baseline justify-between text-sm">
-                <span className="font-medium">{g.name}</span>
-                <span className="tnum text-muted">
-                  {fmtDur(sec)} / {Math.round((g.weekly_goal_minutes / 60) * 10) / 10}h
+              <div className="mb-2 flex items-baseline gap-2">
+                <span
+                  className="h-2.5 w-2.5 translate-y-[-1px] rounded-full"
+                  style={{ background: g.color }}
+                />
+                <span className="text-sm font-semibold">{g.name}</span>
+                <span className="text-[11px] text-muted">
+                  {kind.emoji} {type === "limite" ? "límite" : "meta"}
                 </span>
               </div>
-              <ProgressBar pct={pct} color={g.color} />
-              <p className="mt-1 text-[11px] text-muted">
-                {pct >= 100
-                  ? "✓ Meta cumplida"
-                  : `${Math.round(pct)}% · faltan ${fmtDur(g.weekly_goal_minutes * 60 - sec)}`}
-              </p>
+              <div className="space-y-3">
+                {day > 0 && (
+                  <GoalLine
+                    label="Hoy"
+                    sec={sec.today[g.id] || 0}
+                    goalMin={day}
+                    type={type}
+                  />
+                )}
+                {week > 0 && (
+                  <GoalLine
+                    label="Esta semana"
+                    sec={sec.week[g.id] || 0}
+                    goalMin={week}
+                    type={type}
+                  />
+                )}
+              </div>
             </div>
           );
         })}
@@ -844,9 +941,13 @@ function Compare({ groups, refreshKey }) {
   );
 }
 
-/* --------------------------------------------------------- SUEÑO VS ESTUDIO */
+/* ----------------------------------------------------- SUEÑO VS RENDIMIENTO */
 
-function SleepVsStudy({ sleep, refreshKey }) {
+/**
+ * Acá solo entra el tiempo productivo: cruzar el sueño contra las horas de
+ * PlayStation no dice nada útil (y además ensuciaría la correlación).
+ */
+function SleepVsStudy({ sleep, groups, refreshKey }) {
   useThemeVersion();
   const [span, setSpan] = useState(30);
   const [sessions, setSessions] = useState([]);
@@ -858,9 +959,14 @@ function SleepVsStudy({ sleep, refreshKey }) {
     listSessions(startKey, endKey).then(setSessions);
   }, [startKey, endKey, refreshKey]);
 
+  const gmap = useMemo(() => Object.fromEntries(groups.map((g) => [g.id, g])), [groups]);
+
   const data = useMemo(() => {
     const study = {};
     sessions.forEach((s) => {
+      const g = gmap[s.group_id];
+      const root = g?.parent_id ? gmap[g.parent_id] || g : g;
+      if (kindOf(root) !== "productivo") return;
       study[s.local_date] = (study[s.local_date] || 0) + s.duration_seconds;
     });
     const sl = {};
@@ -868,14 +974,14 @@ function SleepVsStudy({ sleep, refreshKey }) {
     return eachDayKey(startKey, endKey).map((k) => ({
       key: k,
       label: shortDate(fromKey(k)),
-      estudio: toHours(study[k] || 0),
+      productivo: toHours(study[k] || 0),
       sueno: sl[k] ?? null,
       sec: study[k] || 0,
     }));
-  }, [sessions, sleep, startKey, endKey]);
+  }, [sessions, sleep, gmap, startKey, endKey]);
 
   const paired = data.filter((d) => d.sueno !== null && d.sueno > 0);
-  const r = pearson(paired.map((d) => d.sueno), paired.map((d) => d.estudio));
+  const r = pearson(paired.map((d) => d.sueno), paired.map((d) => d.productivo));
 
   const buckets = useMemo(() => {
     const defs = [
@@ -887,7 +993,7 @@ function SleepVsStudy({ sleep, refreshKey }) {
     return defs.map((d) => {
       const rows = paired.filter((p) => d.test(p.sueno));
       const avg = rows.length
-        ? Math.round((rows.reduce((a, b) => a + b.estudio, 0) / rows.length) * 100) / 100
+        ? Math.round((rows.reduce((a, b) => a + b.productivo, 0) / rows.length) * 100) / 100
         : 0;
       return { ...d, avg, n: rows.length };
     });
@@ -897,16 +1003,16 @@ function SleepVsStudy({ sleep, refreshKey }) {
 
   const reading =
     r === null
-      ? "Cargá al menos 3 noches con estudio el mismo día para calcular la correlación."
+      ? "Cargá al menos 3 noches con tiempo productivo el mismo día para calcular la correlación."
       : r > 0.4
-      ? "Correlación positiva clara: los días que dormís más, estudiás más."
+      ? "Correlación positiva clara: los días que dormís más, rendís más."
       : r > 0.15
       ? "Correlación positiva leve: dormir mejor parece ayudarte un poco."
       : r > -0.15
-      ? "Sin relación clara entre tus horas de sueño y tu tiempo de estudio."
+      ? "Sin relación clara entre tus horas de sueño y tu tiempo productivo."
       : r > -0.4
-      ? "Correlación negativa leve: los días que estudiás más, dormís algo menos."
-      : "Correlación negativa clara: estás recortando sueño para estudiar más.";
+      ? "Correlación negativa leve: los días que más producís, dormís algo menos."
+      : "Correlación negativa clara: estás recortando sueño para meterle más horas.";
 
   return (
     <div className="space-y-5">
@@ -914,7 +1020,8 @@ function SleepVsStudy({ sleep, refreshKey }) {
         <div>
           <h3 className="text-base font-bold">Sueño vs. productividad</h3>
           <p className="text-sm text-muted">
-            Cruza tus horas de sueño con las horas de estudio de ese mismo día.
+            Cruza tus horas de sueño con las horas productivas de ese mismo día
+            (el despeje y el gimnasio no cuentan acá).
           </p>
         </div>
         <Segmented
@@ -938,7 +1045,7 @@ function SleepVsStudy({ sleep, refreshKey }) {
         <Stat
           label="Tu mejor franja de sueño"
           value={best && best.n ? best.label : "—"}
-          sub={best && best.n ? `${best.avg} h de estudio promedio` : "sin datos"}
+          sub={best && best.n ? `${best.avg} h productivas promedio` : "sin datos"}
           accent={best?.color}
         />
         <Stat
@@ -962,16 +1069,19 @@ function SleepVsStudy({ sleep, refreshKey }) {
                 <Tooltip
                   cursor={{ fill: themeColorA("ink", 0.05) }}
                   contentStyle={tooltipStyle}
-                  formatter={(v, n) => [v === null ? "—" : `${v} h`, n === "estudio" ? "Estudio" : "Sueño"]}
+                  formatter={(v, n) => [
+                    v === null ? "—" : `${v} h`,
+                    n === "productivo" ? "Productivo" : "Sueño",
+                  ]}
                 />
                 <Legend
                   formatter={(v) => (
                     <span style={legendStyle()}>
-                      {v === "estudio" ? "Estudio" : "Sueño"}
+                      {v === "productivo" ? "Productivo" : "Sueño"}
                     </span>
                   )}
                 />
-                <RBar dataKey="estudio" fill={themeColor("accent")} radius={[4, 4, 0, 0]} maxBarSize={26} />
+                <RBar dataKey="productivo" fill={themeColor("accent")} radius={[4, 4, 0, 0]} maxBarSize={26} />
                 <Line
                   type="monotone"
                   dataKey="sueno"
@@ -990,7 +1100,7 @@ function SleepVsStudy({ sleep, refreshKey }) {
       </div>
 
       <div className="card p-5">
-        <p className="label">Horas de estudio promedio según cuánto dormiste</p>
+        <p className="label">Horas productivas promedio según cuánto dormiste</p>
         <div className="mt-3 space-y-3">
           {buckets.map((b) => (
             <div key={b.label}>

@@ -21,6 +21,7 @@ import { syncPushSubscription } from "@/lib/push";
 import { AuthProvider, displayName, useAuth, useSignOut } from "@/lib/auth";
 import { fmtDur, periodRange, todayKey } from "@/lib/utils";
 import { applyTheme } from "@/lib/theme";
+import { KINDS, dailyGoalMin, goalTypeOf, kindOf } from "@/lib/kinds";
 
 const TABS = [
   { id: "timer", label: "Timer" },
@@ -126,22 +127,48 @@ function App({ userId, email, name }) {
   }, [settings.theme]);
 
   // agregados de la semana en curso
-  const { todaySec, weekByGroup } = useMemo(() => {
+  const { todaySec, weekByGroup, todayByGroup, todayByKind } = useMemo(() => {
     const gmap = Object.fromEntries(groups.map((g) => [g.id, g]));
     const tk = todayKey();
     let today = 0;
     const week = {};
+    const day = {};
+    const kinds = {};
     weekSessions.forEach((s) => {
-      if (s.local_date === tk) today += s.duration_seconds;
+      const isToday = s.local_date === tk;
+      if (isToday) today += s.duration_seconds;
       const g = gmap[s.group_id];
       if (!g) return;
+      const root = g.parent_id ? gmap[g.parent_id] || g : g;
       week[g.id] = (week[g.id] || 0) + s.duration_seconds;
       if (g.parent_id) week[g.parent_id] = (week[g.parent_id] || 0) + s.duration_seconds;
+      if (isToday) {
+        day[g.id] = (day[g.id] || 0) + s.duration_seconds;
+        if (g.parent_id) day[g.parent_id] = (day[g.parent_id] || 0) + s.duration_seconds;
+        kinds[kindOf(root)] = (kinds[kindOf(root)] || 0) + s.duration_seconds;
+      }
     });
-    return { todaySec: today, weekByGroup: week };
+    return { todaySec: today, weekByGroup: week, todayByGroup: day, todayByKind: kinds };
   }, [weekSessions, groups]);
 
   const weekTotal = weekSessions.reduce((a, s) => a + s.duration_seconds, 0);
+
+  // Límites diarios pasados. Es el aviso de "che, ya está" que pediste: mira
+  // solo los grupos con límite diario y compara con lo de hoy.
+  const passedLimits = useMemo(
+    () =>
+      groups
+        .filter((g) => !g.parent_id && goalTypeOf(g) === "limite" && dailyGoalMin(g) > 0)
+        .map((g) => ({
+          id: g.id,
+          name: g.name,
+          emoji: KINDS[kindOf(g)].emoji,
+          sec: todayByGroup[g.id] || 0,
+          goalSec: dailyGoalMin(g) * 60,
+        }))
+        .filter((x) => x.sec > x.goalSec),
+    [groups, todayByGroup]
+  );
 
   return (
     <>
@@ -173,6 +200,23 @@ function App({ userId, email, name }) {
               <p className="text-[10px] uppercase tracking-[.14em] text-muted">Hoy</p>
               <p className="tnum text-sm font-bold">{fmtDur(todaySec)}</p>
             </div>
+            {todayByKind.despeje > 0 && (
+              <>
+                <div className="h-8 w-px bg-line" />
+                <div title="Tiempo de despeje de hoy">
+                  <p className="text-[10px] uppercase tracking-[.14em] text-muted">
+                    {KINDS.despeje.emoji} Despeje
+                  </p>
+                  <p
+                    className={`tnum text-sm font-bold ${
+                      passedLimits.length ? "text-focus" : ""
+                    }`}
+                  >
+                    {fmtDur(todayByKind.despeje)}
+                  </p>
+                </div>
+              </>
+            )}
             <div className="h-8 w-px bg-line" />
             <div>
               <p className="text-[10px] uppercase tracking-[.14em] text-muted">Semana</p>
@@ -232,6 +276,17 @@ function App({ userId, email, name }) {
           ))}
         </nav>
 
+        {passedLimits.length > 0 && (
+          <div className="mb-5 rounded-xl border border-focus/40 bg-focus/10 p-4 text-sm text-focus">
+            {passedLimits.map((l) => (
+              <p key={l.id}>
+                {l.emoji} <b>{l.name}</b>: {fmtDur(l.sec)} hoy · te pasaste del límite de{" "}
+                {fmtDur(l.goalSec)} por {fmtDur(l.sec - l.goalSec)}.
+              </p>
+            ))}
+          </div>
+        )}
+
         {error && (
           <div className="mb-5 rounded-xl border border-focus/40 bg-focus/10 p-4 text-sm text-focus">
             <b>Error de conexión:</b> {error}
@@ -253,6 +308,7 @@ function App({ userId, email, name }) {
                 onSaved={refresh}
                 todaySec={todaySec}
                 weekByGroup={weekByGroup}
+                todayByGroup={todayByGroup}
                 userId={userId}
                 name={name}
               />
@@ -264,7 +320,12 @@ function App({ userId, email, name }) {
               <Sleep onChange={refresh} goalHours={settings.sleepGoalHours} />
             )}
             {tab === "groups" && (
-              <GroupsManager groups={groups} weekByGroup={weekByGroup} onChange={refresh} />
+              <GroupsManager
+                groups={groups}
+                weekByGroup={weekByGroup}
+                todayByGroup={todayByGroup}
+                onChange={refresh}
+              />
             )}
             {tab === "settings" && (
               <SettingsPanel
