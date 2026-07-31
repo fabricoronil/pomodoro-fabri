@@ -25,12 +25,27 @@ import {
 import { themeColor, themeColorA, useThemeVersion } from "@/lib/theme";
 import { Empty, Stat, Segmented } from "./ui";
 
-const IDEAL = 8;
+/** Si no hay meta cargada, 8 h (lo que recomienda cualquier manual) */
+const DEFAULT_GOAL = 8;
 
-const colorFor = (h) =>
-  h >= 7.5 ? themeColor("rest") : h >= 6.5 ? "#fbbf24" : h > 0 ? themeColor("focus") : themeColor("surface3");
+/**
+ * Los umbrales del color son relativos a la meta de cada uno: media hora
+ * por debajo sigue estando bien, hora y media por debajo ya es poco.
+ * Con la meta en 8 h da exactamente 7.5 / 6.5, como estaba antes.
+ */
+const colorForGoal = (goal) => (h) =>
+  h >= goal - 0.5
+    ? themeColor("rest")
+    : h >= goal - 1.5
+    ? "#fbbf24"
+    : h > 0
+    ? themeColor("focus")
+    : themeColor("surface3");
 
-export default function Sleep({ onChange }) {
+export default function Sleep({ onChange, goalHours = DEFAULT_GOAL }) {
+  const goal = Number(goalHours) > 0 ? Number(goalHours) : DEFAULT_GOAL;
+  const colorFor = useMemo(() => colorForGoal(goal), [goal]);
+  const streakMin = Math.max(1, Math.round((goal - 1) * 10) / 10);
   useThemeVersion(); // el gráfico usa los colores del tema
   const [logs, setLogs] = useState([]);
   const [span, setSpan] = useState(14);
@@ -119,16 +134,16 @@ export default function Sleep({ onChange }) {
   const debt = useMemo(() => {
     const vals = chartData.slice(-7).filter((d) => d.hours > 0);
     if (!vals.length) return null;
-    return Math.round(vals.reduce((a, d) => a + (IDEAL - d.hours), 0) * 10) / 10;
-  }, [chartData]);
+    return Math.round(vals.reduce((a, d) => a + (goal - d.hours), 0) * 10) / 10;
+  }, [chartData, goal]);
   const streak = useMemo(() => {
     let n = 0;
     for (let i = chartData.length - 1; i >= 0; i--) {
-      if (chartData[i].hours >= 7) n++;
+      if (chartData[i].hours >= streakMin) n++;
       else break;
     }
     return n;
-  }, [chartData]);
+  }, [chartData, streakMin]);
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
@@ -142,6 +157,8 @@ export default function Sleep({ onChange }) {
 
       <TodayCard
         log={byDate[todayKey()]}
+        goal={goal}
+        colorFor={colorFor}
         onLoad={() => {
           setDateKey(todayKey());
           formRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -152,17 +169,28 @@ export default function Sleep({ onChange }) {
         <Stat
           label="Promedio 7 días"
           value={avg7 ? `${avg7} h` : "—"}
-          sub={avg7 ? (avg7 >= 7.5 ? "Vas bien" : avg7 >= 6.5 ? "Justito" : "Estás durmiendo poco") : "Sin datos"}
+          sub={
+            avg7
+              ? avg7 >= goal - 0.5
+                ? "Vas bien"
+                : avg7 >= goal - 1.5
+                ? "Justito"
+                : "Estás durmiendo poco"
+              : "Sin datos"
+          }
           accent={avg7 ? colorFor(avg7) : undefined}
         />
         <Stat label={`Promedio ${span} días`} value={avgSpan ? `${avgSpan} h` : "—"} />
         <Stat
           label="Deuda de sueño (7d)"
           value={debt === null ? "—" : `${debt > 0 ? "+" : ""}${debt} h`}
-          sub={debt === null ? "" : debt > 0 ? `vs. ${IDEAL}h por noche` : "Estás al día"}
+          sub={debt === null ? "" : debt > 0 ? `vs. ${goal}h por noche` : "Estás al día"}
           accent={themeColor(debt !== null && debt > 3 ? "focus" : "rest")}
         />
-        <Stat label="Racha ≥7h" value={`${streak} ${streak === 1 ? "día" : "días"}`} />
+        <Stat
+          label={`Racha ≥${streakMin}h`}
+          value={`${streak} ${streak === 1 ? "día" : "días"}`}
+        />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[340px_minmax(0,1fr)]">
@@ -238,7 +266,7 @@ export default function Sleep({ onChange }) {
                   }}
                   formatter={(v) => [`${v} h`, "Sueño"]}
                 />
-                <ReferenceLine y={IDEAL} stroke={themeColor("accent")} strokeDasharray="4 4" />
+                <ReferenceLine y={goal} stroke={themeColor("accent")} strokeDasharray="4 4" />
                 <RBar dataKey="hours" radius={[6, 6, 0, 0]} maxBarSize={34}>
                   {chartData.map((d) => (
                     <Cell key={d.key} fill={colorFor(d.hours)} />
@@ -283,7 +311,7 @@ export default function Sleep({ onChange }) {
   );
 }
 
-function TodayCard({ log, onLoad }) {
+function TodayCard({ log, onLoad, goal = DEFAULT_GOAL, colorFor = colorForGoal(DEFAULT_GOAL) }) {
   const hours = log?.hours ? Number(log.hours) : null;
   const c = colorFor(hours || 0);
 
@@ -307,9 +335,9 @@ function TodayCard({ log, onLoad }) {
   }
 
   const verdict =
-    hours >= 7.5
+    hours >= goal - 0.5
       ? "Dormiste bien. Buen día para exigirte."
-      : hours >= 6.5
+      : hours >= goal - 1.5
       ? "Justito. Bajá un cambio si te cuesta concentrarte."
       : "Dormiste poco. Ojo con encadenar pomodoros largos hoy.";
 

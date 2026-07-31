@@ -1,6 +1,6 @@
 /* eslint-disable no-undef */
 /**
- * Service worker de Pomodoro Fabri.
+ * Service worker de Pomodoro.
  *
  * Es lo único de la app que sigue vivo con la web cerrada. No hace caché ni
  * nada offline: está solo para recibir el push que manda la Edge Function
@@ -84,7 +84,7 @@ self.addEventListener("push", (event) => {
     data = { body: event.data ? event.data.text() : "" };
   }
 
-  const title = data.title || "Pomodoro Fabri";
+  const title = data.title || "Pomodoro";
   const options = {
     body: data.body || "Terminó tu bloque.",
     tag: data.tag || "pomodoro",

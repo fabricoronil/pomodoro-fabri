@@ -18,7 +18,7 @@ import {
   DEFAULT_SETTINGS,
 } from "@/lib/db";
 import { syncPushSubscription } from "@/lib/push";
-import { AuthProvider, useAuth, useSignOut } from "@/lib/auth";
+import { AuthProvider, displayName, useAuth, useSignOut } from "@/lib/auth";
 import { fmtDur, periodRange, todayKey } from "@/lib/utils";
 import { applyTheme } from "@/lib/theme";
 
@@ -57,10 +57,17 @@ function Gate() {
   if (needsAuth) return <Auth />;
 
   // key: al cambiar de cuenta la app se reinicia limpia
-  return <App key={user?.id || "local"} userId={user?.id || null} email={user?.email || ""} />;
+  return (
+    <App
+      key={user?.id || "local"}
+      userId={user?.id || null}
+      email={user?.email || ""}
+      name={displayName(user)}
+    />
+  );
 }
 
-function App({ userId, email }) {
+function App({ userId, email, name }) {
   const signOut = useSignOut();
   const [showWelcome, setShowWelcome] = useState(true);
   const [tab, setTab] = useState("timer");
@@ -138,7 +145,7 @@ function App({ userId, email }) {
 
   return (
     <>
-      {showWelcome && <Welcome onDone={() => setShowWelcome(false)} />}
+      {showWelcome && <Welcome name={name} onDone={() => setShowWelcome(false)} />}
 
       <div className="mx-auto min-h-dvh w-full max-w-7xl px-4 pb-24 pt-5 sm:px-6">
         {/* -------- header -------- */}
@@ -149,7 +156,13 @@ function App({ userId, email }) {
             </div>
             <div>
               <p className="text-sm font-bold leading-tight">
-                Hola, <span className="text-accent">Fabri</span>
+                {name ? (
+                  <>
+                    Hola, <span className="text-accent">{name}</span>
+                  </>
+                ) : (
+                  "Hola"
+                )}
               </p>
               <p className="text-xs text-muted">Es hora de trabajar</p>
             </div>
@@ -173,14 +186,15 @@ function App({ userId, email }) {
                   title={email}
                   className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-surface2/70 text-sm font-bold uppercase text-ink transition hover:bg-surface3"
                 >
-                  {(email || "?").charAt(0)}
+                  {(name || email || "?").charAt(0)}
                 </button>
                 {menu && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} />
                     <div className="card absolute right-0 z-50 mt-2 w-60 p-3 text-left">
                       <p className="truncate text-xs text-muted">Sesión iniciada como</p>
-                      <p className="mb-3 truncate text-sm font-semibold">{email}</p>
+                      {name && <p className="truncate text-sm font-semibold">{name}</p>}
+                      <p className="mb-3 truncate text-xs text-muted">{email}</p>
                       <button
                         onClick={() => {
                           setMenu(false);
@@ -240,12 +254,15 @@ function App({ userId, email }) {
                 todaySec={todaySec}
                 weekByGroup={weekByGroup}
                 userId={userId}
+                name={name}
               />
             )}
             {tab === "stats" && (
               <Analytics groups={groups} refreshKey={refreshKey} onChange={refresh} />
             )}
-            {tab === "sleep" && <Sleep onChange={refresh} />}
+            {tab === "sleep" && (
+              <Sleep onChange={refresh} goalHours={settings.sleepGoalHours} />
+            )}
             {tab === "groups" && (
               <GroupsManager groups={groups} weekByGroup={weekByGroup} onChange={refresh} />
             )}

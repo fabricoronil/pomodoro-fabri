@@ -1,8 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { backend, exportAll, importAll, readLocalBackup, DEFAULT_SETTINGS } from "@/lib/db";
-import { friendlyError, updatePassword, useSignOut } from "@/lib/auth";
+import {
+  fullName,
+  friendlyError,
+  updateName,
+  updatePassword,
+  useAuth,
+  useSignOut,
+} from "@/lib/auth";
 import { todayKey } from "@/lib/utils";
 import Appearance from "./Appearance";
 import PushCard from "./PushCard";
@@ -49,10 +56,37 @@ function Num({ value, onChange, min = 1, max = 600 }) {
 
 function Account({ email }) {
   const signOut = useSignOut();
+  const { user } = useAuth();
+  const current = fullName(user);
+  const [name, setName] = useState(current);
+  const [nameMsg, setNameMsg] = useState("");
+  const [nameErr, setNameErr] = useState("");
+  const [savingName, setSavingName] = useState(false);
   const [pass, setPass] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // si el nombre cambió en otra pestaña, seguimos lo que diga la sesión
+  useEffect(() => setName(current), [current]);
+
+  const saveName = async () => {
+    setNameMsg("");
+    setNameErr("");
+    if (!name.trim()) {
+      setNameErr("Escribí un nombre.");
+      return;
+    }
+    setSavingName(true);
+    try {
+      await updateName(name);
+      setNameMsg("Nombre actualizado.");
+    } catch (e) {
+      setNameErr(friendlyError(e));
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const change = async () => {
     setMsg("");
@@ -81,6 +115,30 @@ function Account({ email }) {
           Cerrar sesión
         </button>
       </Row>
+      <div className="border-b border-line/50 pt-3.5 pb-3.5">
+        <p className="text-sm font-medium">Tu nombre</p>
+        <p className="text-xs text-muted">Así te saluda la app al entrar.</p>
+        <div className="mt-2 flex gap-2">
+          <input
+            type="text"
+            autoComplete="given-name"
+            placeholder="Tu nombre"
+            className="field"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button
+            onClick={saveName}
+            disabled={savingName || !name.trim() || name.trim() === current}
+            className="btn-ghost shrink-0"
+          >
+            Guardar
+          </button>
+        </div>
+        {nameErr && <p className="mt-2 text-xs font-semibold text-focus">{nameErr}</p>}
+        {nameMsg && <p className="mt-2 text-xs font-semibold text-rest">{nameMsg}</p>}
+      </div>
+
       <div className="pt-3.5">
         <p className="text-sm font-medium">Cambiar contraseña</p>
         <div className="mt-2 flex gap-2">
@@ -119,7 +177,7 @@ export default function Settings({ settings, setSettings, onChange, email, userI
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `pomodoro-fabri-${todayKey()}.json`;
+    a.download = `pomodoro-${todayKey()}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -183,6 +241,29 @@ export default function Settings({ settings, setSettings, onChange, email, userI
         </Row>
         <Row title="Descanso largo cada" desc="cantidad de pomodoros">
           <Num value={settings.longEvery} onChange={(v) => set("longEvery", v)} min={2} max={12} />
+        </Row>
+      </div>
+
+      <div className="card p-5">
+        <p className="label">Metas</p>
+        <p className="-mt-1 mb-2 text-xs text-muted">
+          Las metas semanales de estudio se ponen por grupo, en la pestaña Grupos.
+        </p>
+        <Row title="Meta de sueño" desc="horas por noche · la línea del gráfico y la deuda salen de acá">
+          <input
+            type="number"
+            min={4}
+            max={14}
+            step={0.5}
+            value={settings.sleepGoalHours}
+            onChange={(e) =>
+              set(
+                "sleepGoalHours",
+                Math.max(4, Math.min(14, Number(e.target.value) || 8))
+              )
+            }
+            className="field w-20 text-center"
+          />
         </Row>
       </div>
 

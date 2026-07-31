@@ -60,6 +60,22 @@ function localDateKey(ms: number, timeZone: string | null): string {
   }
 }
 
+/**
+ * Cómo llamar a la persona en el aviso. Misma regla que displayName() en
+ * lib/auth.jsx: el nombre que cargó al registrarse (o el que mandó Google),
+ * y si no hay nada, la parte del mail antes de la arroba.
+ */
+function firstName(user: { email?: string; user_metadata?: Record<string, unknown> } | null) {
+  if (!user) return "";
+  const m = user.user_metadata ?? {};
+  const raw = String(m.full_name ?? m.name ?? m.user_name ?? "").trim();
+  if (raw) return raw.split(/\s+/)[0];
+  const local = (user.email ?? "").split("@")[0].replace(/[._-]+/g, " ").trim();
+  if (!local) return "";
+  const first = local.split(" ")[0];
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
 const durationOf = (mode: string, s: Settings) =>
   (mode === "focus" ? s.focus_min : mode === "short" ? s.short_min : s.long_min) * 60;
 
@@ -136,6 +152,22 @@ Deno.serve(async (req) => {
     settingsByUser.set(row.user_id, { ...DEFAULT_SETTINGS, ...row });
   }
 
+  // ------------------------------------------------ nombre de esos usuarios
+  //  Para saludar por el nombre en el push. Son pocos por corrida (los que
+  //  justo terminaron un bloque), y si falla la consulta el aviso sale igual
+  //  con el texto genérico.
+  const nameByUser = new Map<string, string>();
+  await Promise.all(
+    userIds.map(async (id) => {
+      try {
+        const { data } = await admin.auth.admin.getUserById(id);
+        nameByUser.set(id, firstName(data?.user ?? null));
+      } catch {
+        nameByUser.set(id, "");
+      }
+    })
+  );
+
   for (const row of pendientes) {
     try {
       const s = settingsByUser.get(row.user_id) ?? DEFAULT_SETTINGS;
@@ -210,9 +242,14 @@ Deno.serve(async (req) => {
       //  sesión igual quedó guardada arriba.
       if (staleSec >= STALE_SEC) continue;
 
+      const nombre = nameByUser.get(row.user_id) || "";
       const payload = JSON.stringify({
         title: wasFocus ? "Pomodoro completado" : "Descanso terminado",
-        body: wasFocus ? "Tomate un respiro, Fabri." : "Dale, volvé a la carga.",
+        body: wasFocus
+          ? nombre
+            ? `Tomate un respiro, ${nombre}.`
+            : "Tomate un respiro."
+          : "Dale, volvé a la carga.",
         tag: "pomodoro",
         url: "/",
       });

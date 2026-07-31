@@ -64,6 +64,28 @@ export function AuthProvider({ children }) {
 
 export const useAuth = () => useContext(AuthCtx);
 
+/** El nombre tal cual quedó guardado (el que escribió o el que mandó Google) */
+export function fullName(user) {
+  const m = user?.user_metadata || {};
+  return String(m.full_name || m.name || m.user_name || "").trim();
+}
+
+/**
+ * Cómo llamar a la persona en pantalla.
+ *
+ * Por orden: el nombre que escribió al crear la cuenta, el que manda Google,
+ * y si no hay nada, la parte del mail antes de la arroba (capitalizada).
+ */
+export function displayName(user) {
+  if (!user) return "";
+  const clean = fullName(user);
+  if (clean) return clean.split(/\s+/)[0]; // saludamos por el primer nombre
+  const local = (user.email || "").split("@")[0].replace(/[._-]+/g, " ").trim();
+  if (!local) return "";
+  const first = local.split(" ")[0];
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
 // ------------------------------------------------------------- acciones
 
 const ERRORS = {
@@ -97,14 +119,30 @@ export async function signIn(email, password) {
   return data;
 }
 
-/** Devuelve { needsConfirmation: true } si Supabase pide confirmar el mail */
-export async function signUp(email, password) {
+/**
+ * Devuelve { needsConfirmation: true } si Supabase pide confirmar el mail.
+ *
+ * El nombre viaja en user_metadata.full_name: es el mismo campo que llena
+ * Google, así que después da igual por dónde entró la persona.
+ */
+export async function signUp(email, password, name = "") {
+  const full_name = name.trim();
   const { data, error } = await supabase.auth.signUp({
     email: email.trim(),
     password,
+    options: full_name ? { data: { full_name } } : undefined,
   });
   if (error) throw error;
   return { needsConfirmation: !data.session };
+}
+
+/** Cambia el nombre visible del usuario logueado */
+export async function updateName(name) {
+  const { data, error } = await supabase.auth.updateUser({
+    data: { full_name: name.trim() },
+  });
+  if (error) throw error;
+  return data.user;
 }
 
 /**

@@ -1,4 +1,4 @@
-# Pomodoro Fabri
+# Pomodoro
 
 Timer pomodoro con analítica de estudio, grupos/subgrupos, metas semanales y control de sueño.
 Next.js 14 + Tailwind + Supabase. Pensado para hostear en Vercel y abrir desde cualquier dispositivo.
@@ -7,10 +7,10 @@ Next.js 14 + Tailwind + Supabase. Pensado para hostear en Vercel y abrir desde c
 
 ## Qué hace
 
-- **Cuenta propia**: registro e inicio de sesión con email y contraseña. Cada cuenta ve solo sus datos.
+- **Cuenta propia**: registro e inicio de sesión con nombre, email y contraseña (o directo con Google). Cada cuenta ve solo sus datos, y la app te saluda por tu nombre. Se puede cambiar después en *Ajustes → Cuenta*.
 - **Timer que no se corta**: el pomodoro vive en tu cuenta, no en el navegador. Lo arrancás en la compu, abrís el celular y sigue exactamente igual. Podés cerrar la web: al volver, si el bloque ya había terminado, la sesión queda guardada sola. **Solo se detiene si lo cancelás.**
 - **Timer**: enfoque / descanso corto / descanso largo, configurables. Sigue corriendo si refrescás la pestaña.
-- **Grupos y subgrupos**: ya vienen cargados *Facultad* (Física II, Paradigma y Lenguaje de Programación II, Portugués A, Sistema de Representación, Sistemas Operativos), *Inglés* y *Personal*. Podés agregar, editar y borrar los que quieras.
+- **Grupos y subgrupos**: cada cuenta nueva arranca con tres grupos genéricos (*Estudio*, *Trabajo*, *Personal*) para poder tirar el primer pomodoro sin configurar nada. Podés renombrarlos, borrarlos y colgarles los subgrupos que quieras.
 - **Notas por sesión**: al terminar un pomodoro te pregunta qué hiciste.
 - **Metas semanales** por grupo, con barra de progreso.
 - **Analítica**: día / semana / mes / año, con navegación entre períodos y comparación automática contra el período anterior.
@@ -191,7 +191,7 @@ La primera vez te va a pedir **crear una cuenta**. Después queda la sesión ini
    git add .
    git commit -m "pomodoro"
    git branch -M main
-   git remote add origin https://github.com/TU_USUARIO/pomodoro-fabri.git
+   git remote add origin https://github.com/TU_USUARIO/pomodoro.git
    git push -u origin main
    ```
 2. Entrá a <https://vercel.com> → **Add New → Project** → importá el repo.
@@ -226,7 +226,7 @@ app/
   page.jsx          shell: header, pestañas, estado compartido
   globals.css       variables del tema, fondos y clases base
 components/
-  Welcome.jsx       animación de entrada "Bienvenido Fabri"
+  Welcome.jsx       animación de entrada "Bienvenido <nombre>"
   Auth.jsx          registro / inicio de sesión
   Timer.jsx         pomodoro sincronizado, selección de grupo, notas
   Analytics.jsx     resumen, comparar fechas, sueño vs estudio, sesiones

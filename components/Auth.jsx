@@ -35,6 +35,7 @@ function GoogleMark() {
 
 export default function Auth() {
   const [tab, setTab] = useState("in"); // in | up
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -75,6 +76,10 @@ export default function Auth() {
       setError("Completá el email y la contraseña.");
       return;
     }
+    if (isUp && !name.trim()) {
+      setError("Escribí tu nombre para saber cómo llamarte.");
+      return;
+    }
     if (isUp && password.length < 6) {
       setError("La contraseña necesita al menos 6 caracteres.");
       return;
@@ -82,7 +87,7 @@ export default function Auth() {
     setBusy(true);
     try {
       if (isUp) {
-        const { needsConfirmation } = await signUp(email, password);
+        const { needsConfirmation } = await signUp(email, password, name);
         if (needsConfirmation) {
           setInfo(
             "Cuenta creada. Te mandamos un mail para confirmarla: abrilo y volvé a entrar."
@@ -134,9 +139,8 @@ export default function Auth() {
             <div className="h-5 w-5 rounded-full border-[3px] border-accent border-t-transparent" />
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight">
-            Pomodoro{" "}
             <span className="bg-gradient-to-r from-accent via-focus to-accent2 bg-clip-text text-transparent">
-              Fabri
+              Pomodoro
             </span>
           </h1>
           <p className="mt-1.5 text-sm text-muted">
@@ -184,6 +188,23 @@ export default function Auth() {
           </div>
 
           <form onSubmit={submit}>
+            {isUp && (
+              <>
+                <label className="label" htmlFor="pf-name">
+                  Nombre
+                </label>
+                <input
+                  id="pf-name"
+                  type="text"
+                  autoComplete="given-name"
+                  className="field mb-4"
+                  placeholder="¿Cómo te llamamos?"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </>
+            )}
+
             <label className="label" htmlFor="pf-email">
               Email
             </label>

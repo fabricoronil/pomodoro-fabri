@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const NAME = "Fabri";
-
-export default function Welcome({ onDone }) {
+export default function Welcome({ name = "", onDone }) {
   const [step, setStep] = useState(0); // 0 saludo · 1 frase · 2 saliendo
 
   useEffect(() => {
@@ -45,7 +43,7 @@ export default function Welcome({ onDone }) {
         >
           <span className="text-muted">{greeting}, </span>
           <span className="bg-gradient-to-r from-accent via-focus to-accent2 bg-clip-text text-transparent">
-            {`Bienvenido ${NAME}`}
+            {name ? `Bienvenido ${name}` : "Bienvenido"}
           </span>
         </h1>
 

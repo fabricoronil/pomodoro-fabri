@@ -78,6 +78,7 @@ export default function Timer({
   todaySec,
   weekByGroup,
   userId = null,
+  name = "",
 }) {
   const parents = useMemo(() => groups.filter((g) => !g.parent_id && !g.archived), [groups]);
 
@@ -258,7 +259,7 @@ export default function Timer({
   useEffect(() => {
     document.title = running
       ? `${fmtClock(countUp ? elapsed : remaining)} · ${MODES[t.mode].short}`
-      : "Pomodoro · Fabri";
+      : "Pomodoro";
   }, [remaining, elapsed, running, t.mode, countUp]);
 
   // ------------------------------------------------------ guardar sesión
@@ -387,7 +388,11 @@ export default function Timer({
           if (settings.notifications) {
             notify(
               wasFocus ? "Pomodoro completado" : "Descanso terminado",
-              wasFocus ? "Tomate un respiro, Fabri." : "Dale, volvé a la carga."
+              wasFocus
+                ? name
+                  ? `Tomate un respiro, ${name}.`
+                  : "Tomate un respiro."
+                : "Dale, volvé a la carga."
             );
           }
         }
@@ -398,7 +403,7 @@ export default function Timer({
         claiming.current = false;
       }
     },
-    [applyRemote, askNote, durationOf, nextModeAfter, saveSession, say, settings, userId]
+    [applyRemote, askNote, durationOf, name, nextModeAfter, saveSession, say, settings, userId]
   );
 
   useEffect(() => {
@@ -1022,7 +1027,7 @@ export default function Timer({
           autoFocus
           rows={4}
           className="field resize-none"
-          placeholder="Ej: TP de Física II, ejercicios 4 a 9"
+          placeholder="Ej: ejercicios 4 a 9 del práctico"
           value={note}
           onChange={(e) => setNote(e.target.value)}
         />

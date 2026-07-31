@@ -1,5 +1,5 @@
 -- =====================================================================
---  Pomodoro Fabri · esquema de base de datos (multiusuario + timer en la nube)
+--  Pomodoro · esquema de base de datos (multiusuario + timer en la nube)
 --  Pegá TODO esto en Supabase -> SQL Editor -> New query -> Run
 --
 --  Se puede correr en una base nueva o sobre una que ya tenía la versión
@@ -146,12 +146,14 @@ create table if not exists public.user_settings (
   volume             numeric not null default 0.5,
   notifications      boolean not null default true,
   ask_note           boolean not null default true,
+  sleep_goal_hours   numeric not null default 8,
   theme              jsonb   not null default '{}'::jsonb,
   time_zone          text,
   updated_at         timestamptz not null default now()
 );
 alter table public.user_settings add column if not exists time_zone text;
 alter table public.user_settings add column if not exists theme jsonb not null default '{}'::jsonb;
+alter table public.user_settings add column if not exists sleep_goal_hours numeric not null default 8;
 
 -- --------------------------------------------------- SUSCRIPCIONES PUSH
 --  Un usuario puede tener varios dispositivos suscriptos: el aviso se manda

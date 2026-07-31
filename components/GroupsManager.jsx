@@ -178,7 +178,7 @@ export default function GroupsManager({ groups, weekByGroup, onChange }) {
           className="field"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Ej: Física II"
+          placeholder="Ej: Matemática, Inglés, Proyecto…"
           onKeyDown={(e) => e.key === "Enter" && save()}
         />
 

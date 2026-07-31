@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Pomodoro · Fabri",
+  title: "Pomodoro",
   description: "Timer pomodoro con analítica de estudio y control de sueño",
   manifest: "/manifest.json",
 };
