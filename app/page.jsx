@@ -11,11 +11,13 @@ import SettingsPanel from "@/components/Settings";
 import {
   listSessions,
   loadSettings,
+  fetchSettings,
   saveSettings,
   seedIfEmpty,
   listGroups,
   DEFAULT_SETTINGS,
 } from "@/lib/db";
+import { syncPushSubscription } from "@/lib/push";
 import { AuthProvider, useAuth, useSignOut } from "@/lib/auth";
 import { fmtDur, periodRange, todayKey } from "@/lib/utils";
 import { applyTheme } from "@/lib/theme";
@@ -89,8 +91,15 @@ function App({ userId, email }) {
   }, []);
 
   useEffect(() => {
+    // primero la caché local (arranque instantáneo, sin parpadeo)…
     setSettingsState(loadSettings());
     (async () => {
+      // …y después lo que diga la nube, que es la fuente de verdad
+      try {
+        setSettingsState(await fetchSettings());
+      } catch (e) {
+        setError(e.message || String(e));
+      }
       try {
         await seedIfEmpty();
       } catch (e) {
@@ -98,8 +107,11 @@ function App({ userId, email }) {
       }
       await refresh();
       setReady(true);
+      // si este dispositivo ya estaba suscripto a los avisos, revalida la
+      // fila en la base (el navegador puede haber rotado el endpoint)
+      syncPushSubscription(userId).catch(() => {});
     })();
-  }, [refresh]);
+  }, [refresh, userId]);
 
   // el tema vive en los ajustes: cada cambio se pinta en <html>
   useEffect(() => {

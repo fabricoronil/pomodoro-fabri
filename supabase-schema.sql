@@ -117,11 +117,66 @@ create table if not exists public.active_timer (
   updated_at        timestamptz not null default now()
 );
 
+--  Cuándo se mandó el aviso push del bloque en curso. Sirve para que el cron
+--  no re-mande la notificación en cada corrida: como se compara contra
+--  ends_at (que siempre está en el futuro cuando arranca un bloque nuevo),
+--  cada bloque avisa exactamente una vez.
+alter table public.active_timer
+  add column if not exists notified_at timestamptz;
+
+-- --------------------------------------------------------- PREFERENCIAS
+--  Una fila por usuario. Antes esto vivía solo en localStorage, pero el
+--  servidor necesita saber las duraciones y el "descanso largo cada N" para
+--  poder cerrar el bloque y decidir qué viene después cuando la web está
+--  cerrada. De paso, los ajustes ahora te siguen entre dispositivos.
+--
+--  time_zone es la zona horaria del navegador (Intl…resolvedOptions()). El
+--  servidor la usa para calcular local_date igual que lo haría el cliente:
+--  sin esto, un pomodoro que termina a las 21:30 de Argentina quedaría
+--  guardado al día siguiente (UTC).
+create table if not exists public.user_settings (
+  user_id            uuid primary key references auth.users(id) on delete cascade,
+  focus_min          integer not null default 25,
+  short_min          integer not null default 5,
+  long_min           integer not null default 15,
+  long_every         integer not null default 4,
+  auto_start_breaks  boolean not null default true,
+  auto_start_focus   boolean not null default false,
+  sound              boolean not null default true,
+  volume             numeric not null default 0.5,
+  notifications      boolean not null default true,
+  ask_note           boolean not null default true,
+  theme              jsonb   not null default '{}'::jsonb,
+  time_zone          text,
+  updated_at         timestamptz not null default now()
+);
+alter table public.user_settings add column if not exists time_zone text;
+alter table public.user_settings add column if not exists theme jsonb not null default '{}'::jsonb;
+
+-- --------------------------------------------------- SUSCRIPCIONES PUSH
+--  Un usuario puede tener varios dispositivos suscriptos: el aviso se manda
+--  a todos. El endpoint es único (lo genera el navegador), así que si te
+--  volvés a suscribir en el mismo dispositivo se pisa la fila en vez de
+--  duplicarla. Si un endpoint deja de existir (404/410), el cron la borra.
+create table if not exists public.push_subscriptions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  endpoint   text not null unique,
+  p256dh     text not null,
+  auth       text not null,
+  device_id  text,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+create index if not exists push_subs_user_idx on public.push_subscriptions(user_id);
+
 -- ----------------------------------------------------------------- RLS
-alter table public.groups       enable row level security;
-alter table public.sessions     enable row level security;
-alter table public.sleep_logs   enable row level security;
-alter table public.active_timer enable row level security;
+alter table public.groups             enable row level security;
+alter table public.sessions           enable row level security;
+alter table public.sleep_logs         enable row level security;
+alter table public.active_timer       enable row level security;
+alter table public.user_settings      enable row level security;
+alter table public.push_subscriptions enable row level security;
 
 -- Fuera las políticas abiertas de la versión de un solo usuario
 drop policy if exists "open groups"     on public.groups;
@@ -132,6 +187,8 @@ drop policy if exists "own groups"       on public.groups;
 drop policy if exists "own sessions"     on public.sessions;
 drop policy if exists "own sleep_logs"   on public.sleep_logs;
 drop policy if exists "own active_timer" on public.active_timer;
+drop policy if exists "own user_settings"      on public.user_settings;
+drop policy if exists "own push_subscriptions" on public.push_subscriptions;
 
 create policy "own groups" on public.groups
   for all to authenticated
@@ -149,6 +206,14 @@ create policy "own active_timer" on public.active_timer
   for all to authenticated
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 
+create policy "own user_settings" on public.user_settings
+  for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create policy "own push_subscriptions" on public.push_subscriptions
+  for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
 -- ------------------------------------------------------------ REALTIME
 --  Para que el timer se refleje al toque en los otros dispositivos.
 do $$
@@ -160,6 +225,72 @@ begin
     when undefined_object then null;  -- no existe la publicación: se ignora
   end;
 end $$;
+
+-- =====================================================================
+--  AVISOS PUSH CON LA WEB CERRADA  ·  cron que despierta a notify-timers
+--
+--  El navegador no puede avisar nada si no está abierto, así que el que
+--  mira el reloj es el servidor: cada minuto una Edge Function busca los
+--  bloques vencidos, los cierra igual que lo haría el cliente y manda el
+--  push a todos los dispositivos suscriptos.
+--
+--  RETRASO MÁXIMO: ~60 segundos (el cron corre cada minuto y no puede
+--  correr más seguido). En la práctica el aviso llega entre 0 y 60 s
+--  después de que el pomodoro termina. La sesión, en cambio, siempre queda
+--  guardada con la hora real de fin (ends_at), no con la hora del aviso.
+--
+--  Antes de correr esto:
+--    1. Deployá la function:  supabase functions deploy notify-timers
+--    2. Cargá los secretos VAPID (ver README).
+--  Después reemplazá TU-REF y TU-SERVICE-ROLE-KEY abajo y descomentá.
+-- =====================================================================
+
+--  Se instalan sin abortar el script: si tu plan o tus permisos no las
+--  habilitan, el resto del esquema (que es lo que hace andar la app) igual
+--  queda aplicado. Sin estas dos no hay avisos push, nada más.
+do $$
+begin
+  begin
+    create extension if not exists pg_cron;
+  exception when others then
+    raise notice 'pg_cron no se pudo instalar: %', sqlerrm;
+  end;
+  begin
+    create extension if not exists pg_net;
+  exception when others then
+    raise notice 'pg_net no se pudo instalar: %', sqlerrm;
+  end;
+end $$;
+
+-- Volver a programarlo es seguro: primero se borra el job anterior si existe.
+--
+--  do $$
+--  begin
+--    perform cron.unschedule('notify-timers');
+--  exception when others then null;
+--  end $$;
+--
+--  select cron.schedule(
+--    'notify-timers',
+--    '* * * * *',                      -- cada minuto
+--    $cron$
+--      select net.http_post(
+--        url     := 'https://TU-REF.supabase.co/functions/v1/notify-timers',
+--        headers := jsonb_build_object(
+--                     'Content-Type',  'application/json',
+--                     'Authorization', 'Bearer TU-SERVICE-ROLE-KEY'
+--                   ),
+--        body    := '{}'::jsonb,
+--        timeout_milliseconds := 25000
+--      );
+--    $cron$
+--  );
+
+-- Para ver si está corriendo:
+--   select * from cron.job;
+--   select * from cron.job_run_details order by start_time desc limit 20;
+-- Para apagarlo:
+--   select cron.unschedule('notify-timers');
 
 -- =====================================================================
 --  ADOPTAR DATOS VIEJOS  (solo si ya usabas la versión sin cuentas)

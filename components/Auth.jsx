@@ -1,7 +1,37 @@
 "use client";
 
-import { useState } from "react";
-import { friendlyError, sendPasswordReset, signIn, signUp } from "@/lib/auth";
+import { useEffect, useState } from "react";
+import {
+  friendlyError,
+  sendPasswordReset,
+  signIn,
+  signInWithGoogle,
+  signUp,
+} from "@/lib/auth";
+
+/** Logotipo de Google, con sus cuatro colores oficiales */
+function GoogleMark() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M45.1 24.5c0-1.6-.1-3.2-.4-4.7H24v8.9h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.3z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 46c6 0 11-2 14.6-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.5 2.1-5.8 0-10.7-3.9-12.4-9.1H4.2v5.7C7.8 41.1 15.3 46 24 46z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M11.6 28.2c-.5-1.4-.7-2.9-.7-4.4s.3-3 .7-4.4v-5.7H4.2C2.6 16.8 1.7 20.3 1.7 23.8s.9 7 2.5 10.1l7.4-5.7z"
+      />
+      <path
+        fill="#EA4335"
+        d="M24 10.3c3.3 0 6.2 1.1 8.5 3.3l6.3-6.3C35 3.8 30 1.7 24 1.7 15.3 1.7 7.8 6.6 4.2 13.7l7.4 5.7C13.3 14.2 18.2 10.3 24 10.3z"
+      />
+    </svg>
+  );
+}
 
 export default function Auth() {
   const [tab, setTab] = useState("in"); // in | up
@@ -12,6 +42,29 @@ export default function Auth() {
   const [info, setInfo] = useState("");
 
   const isUp = tab === "up";
+
+  // Si Google rebota, Supabase vuelve con el motivo en el fragmento de la URL.
+  // Sin esto la pantalla se queda muda y parece que no pasó nada.
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash.includes("error")) return;
+    const p = new URLSearchParams(hash.slice(1));
+    const desc = p.get("error_description") || p.get("error");
+    if (desc) setError(decodeURIComponent(desc.replace(/\+/g, " ")));
+    history.replaceState(null, "", window.location.pathname);
+  }, []);
+
+  const withGoogle = async () => {
+    setError("");
+    setInfo("");
+    setBusy(true);
+    try {
+      await signInWithGoogle(); // se va a Google; vuelve con la sesión hecha
+    } catch (err) {
+      setError(friendlyError(err));
+      setBusy(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -92,6 +145,22 @@ export default function Auth() {
         </div>
 
         <div className="card p-5">
+          <button
+            type="button"
+            onClick={withGoogle}
+            disabled={busy}
+            className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-line bg-surface2/60 px-4 py-3 text-sm font-semibold text-ink transition hover:bg-surface3 disabled:opacity-60"
+          >
+            <GoogleMark />
+            Continuar con Google
+          </button>
+
+          <div className="my-5 flex items-center gap-3">
+            <span className="h-px flex-1 bg-line" />
+            <span className="text-[11px] uppercase tracking-[.18em] text-muted">o</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+
           <div className="mb-5 flex gap-1 rounded-xl border border-line bg-surface2/60 p-1">
             {[
               { id: "in", label: "Iniciar sesión" },

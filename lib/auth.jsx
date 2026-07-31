@@ -77,6 +77,10 @@ const ERRORS = {
     "El registro está desactivado en Supabase (Authentication → Providers → Email).",
   "For security purposes, you can only request this after 60 seconds":
     "Esperá un minuto antes de volver a intentar.",
+  "Unsupported provider: provider is not enabled":
+    "Google todavía no está habilitado en Supabase (Authentication → Providers → Google).",
+  "Error getting user email from external provider":
+    "Google no compartió tu email. Volvé a intentar y aceptá el permiso de email.",
 };
 
 export function friendlyError(e) {
@@ -101,6 +105,32 @@ export async function signUp(email, password) {
   });
   if (error) throw error;
   return { needsConfirmation: !data.session };
+}
+
+/**
+ * Entrada con Google. No hay "registro" separado: la primera vez Supabase
+ * crea la cuenta sola y las siguientes reconoce el mismo email.
+ *
+ * Ojo con el redirectTo: tiene que estar en la lista blanca de Supabase
+ * (Authentication -> URL Configuration -> Redirect URLs), si no vuelve al
+ * Site URL y en local te manda a producción.
+ *
+ * No devuelve sesión: el navegador se va a Google y vuelve con los tokens
+ * en la URL. De eso se encarga `detectSessionInUrl` en lib/supabase.js, y
+ * el AuthProvider se entera por onAuthStateChange.
+ */
+export async function signInWithGoogle() {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+      queryParams: {
+        // para que te deje elegir la cuenta en vez de entrar con la última
+        prompt: "select_account",
+      },
+    },
+  });
+  if (error) throw error;
 }
 
 export async function signOut() {

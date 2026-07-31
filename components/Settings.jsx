@@ -5,6 +5,7 @@ import { backend, exportAll, importAll, readLocalBackup, DEFAULT_SETTINGS } from
 import { friendlyError, updatePassword, useSignOut } from "@/lib/auth";
 import { todayKey } from "@/lib/utils";
 import Appearance from "./Appearance";
+import PushCard from "./PushCard";
 
 function Row({ title, desc, children }) {
   return (
@@ -158,8 +159,9 @@ export default function Settings({ settings, setSettings, onChange, email, userI
       <div>
         <h2 className="text-lg font-bold">Ajustes</h2>
         <p className="text-sm text-muted">
-          Las preferencias se guardan en este dispositivo; los grupos, las sesiones y el
-          pomodoro en curso viven en tu cuenta.
+          {userId
+            ? "Todo vive en tu cuenta: los ajustes, los grupos, las sesiones y el pomodoro en curso. Cambiás algo acá y te sigue a cualquier dispositivo."
+            : "Las preferencias se guardan en este navegador. Configurá Supabase para que te sigan entre dispositivos."}
         </p>
       </div>
 
@@ -216,7 +218,7 @@ export default function Settings({ settings, setSettings, onChange, email, userI
             style={{ accentColor: "rgb(var(--c-accent))" }}
           />
         </Row>
-        <Row title="Notificaciones del navegador" desc="aunque estés en otra pestaña">
+        <Row title="Notificaciones del navegador" desc="con la web abierta, aunque estés en otra pestaña">
           <Toggle
             on={settings.notifications}
             onChange={(v) => {
@@ -228,6 +230,8 @@ export default function Settings({ settings, setSettings, onChange, email, userI
           />
         </Row>
       </div>
+
+      {userId && <PushCard userId={userId} />}
 
       <div className="card p-5">
         <p className="label">Datos</p>
