@@ -14,6 +14,7 @@ import { todayKey } from "@/lib/utils";
 import { NumField } from "./ui";
 import Appearance from "./Appearance";
 import PushCard from "./PushCard";
+import InstallApp from "./InstallApp";
 
 function Row({ title, desc, children }) {
   return (
@@ -303,6 +304,8 @@ export default function Settings({ settings, setSettings, onChange, email, userI
       </div>
 
       {userId && <PushCard userId={userId} />}
+
+      <InstallApp />
 
       <div className="card p-5">
         <p className="label">Datos</p>

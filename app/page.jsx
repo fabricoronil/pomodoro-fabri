@@ -8,6 +8,7 @@ import Analytics from "@/components/Analytics";
 import Sleep from "@/components/Sleep";
 import GroupsManager from "@/components/GroupsManager";
 import SettingsPanel from "@/components/Settings";
+import { DownloadButton } from "@/components/InstallApp";
 import {
   listSessions,
   loadSettings,
@@ -222,6 +223,9 @@ function App({ userId, email, name }) {
               <p className="text-[10px] uppercase tracking-[.14em] text-muted">Semana</p>
               <p className="tnum text-sm font-bold">{fmtDur(weekTotal)}</p>
             </div>
+
+            {/* solo se dibuja en Windows y con la web en un navegador */}
+            <DownloadButton />
 
             {userId && (
               <div className="relative">

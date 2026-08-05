@@ -237,6 +237,22 @@ Abrí la URL en Chrome o Edge → icono de **Instalar** en la barra de direccion
 
 ### Opción B — ejecutable propio (`.exe`)
 
+**Para bajarlo y usarlo:** el botón *Descargar app* del header (aparece solo en Windows, con
+la web abierta en un navegador), o la tarjeta *Tenerla como app* en **Ajustes**. Los dos
+apuntan a las descargas:
+
+👉 **https://github.com/fabricoronil/pomodoro-desktop-releases/releases/latest**
+
+| Archivo | Qué es |
+| --- | --- |
+| `Pomodoro-Setup-X.Y.Z.exe` | Instalador: crea acceso directo en el escritorio y en Inicio, y aparece en "Agregar o quitar programas". |
+| `Pomodoro-portable-X.Y.Z.exe` | Un solo archivo, sin instalar. Lo abrís y listo. |
+
+No están firmados con certificado de código, así que SmartScreen puede avisar: *Más
+información → Ejecutar de todas formas*.
+
+#### Construirlo vos
+
 En `desktop/` hay una app de Electron. Es una **cáscara**: no empaqueta la web adentro, la carga desde el deploy en cada arranque, pidiendo el HTML sin caché para no quedarse pegada a una versión vieja.
 
 ```bash
@@ -245,14 +261,22 @@ npm install
 npm run dist
 ```
 
-Te deja en `desktop/dist/`:
+Te deja los dos `.exe` en `desktop/dist/`. Para probarla sin empaquetar: `npm start`.
 
-| Archivo | Qué es |
-| --- | --- |
-| `Pomodoro-Setup-1.0.0.exe` | Instalador: crea acceso directo en el escritorio y en Inicio, y aparece en "Agregar o quitar programas". |
-| `Pomodoro-portable-1.0.0.exe` | Un solo archivo, sin instalar. Lo abrís y listo. |
+#### Publicar una versión nueva
 
-Para probarla sin empaquetar: `npm start`.
+`desktop/dist` está en `.gitignore` y `.vercelignore`: los binarios **no** van ni al repo del
+código ni al deploy. Viven en un repo público aparte, sin código, solo para que se puedan
+bajar sin cuenta de GitHub. Para sacar una versión:
+
+```bash
+gh release create v1.1.0 desktop/dist/*.exe \
+  --repo fabricoronil/pomodoro-desktop-releases \
+  --title "Pomodoro 1.1.0 — Windows" --notes "qué cambió"
+```
+
+Y actualizá `DESKTOP_VERSION` en `lib/install.js` — de ahí salen los links de descarga de la
+web. Es lo único que hay que tocar.
 
 **Qué trae:**
 
@@ -297,6 +321,7 @@ components/
   GroupsManager.jsx alta/edición de grupos, subgrupos, metas y límites
   Settings.jsx      duraciones, alertas, export/import
   PushCard.jsx      "avisarme aunque la web esté cerrada"
+  InstallApp.jsx    descarga del .exe / instalación como PWA (tarjeta + botón del header)
   Appearance.jsx    temas, colores y fondo (sección Apariencia)
   ui.jsx            piezas compartidas
 lib/
@@ -305,6 +330,7 @@ lib/
   auth.jsx          sesión de usuario (registro, login, logout)
   timerSync.js      el pomodoro en curso: nube + copia local
   push.js           suscripción a los avisos push (API del navegador, sin dependencias)
+  install.js        links de descarga + estado de instalación (PWA / cáscara)
   utils.js          fechas, formatos, correlación
   kinds.js          tipos de actividad y objetivos (meta / límite)
   theme.js          presets, derivación de paleta y aplicación del tema
