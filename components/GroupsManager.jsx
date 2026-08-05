@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { createGroup, updateGroup, deleteGroup } from "@/lib/db";
+import { createGroup, updateGroup, deleteGroup, missingGroupFeatures } from "@/lib/db";
 import { PALETTE, fmtDur } from "@/lib/utils";
 import { KIND_LIST, KIND_ORDER, KINDS, goalTypeOf, kindOf } from "@/lib/kinds";
 import { Modal, Empty, GoalLine, NumField } from "./ui";
@@ -22,6 +22,11 @@ export default function GroupsManager({ groups, weekByGroup, todayByGroup, onCha
 
   const parents = useMemo(() => groups.filter((g) => !g.parent_id), [groups]);
   const childrenOf = (id) => groups.filter((g) => g.parent_id === id);
+
+  // si la base todavía no tiene estas columnas, el tipo y el objetivo no se
+  // guardan (se descartan para no tumbar el resto del grupo). Mejor decirlo.
+  const missingCols = useMemo(() => missingGroupFeatures(), [groups]);
+  const noKinds = missingCols.includes("kind");
 
   // agrupados por tipo de actividad, en orden fijo
   const sections = useMemo(
@@ -123,6 +128,21 @@ export default function GroupsManager({ groups, weekByGroup, todayByGroup, onCha
         </button>
       </div>
 
+      {noKinds && (
+        <div className="mb-5 rounded-xl border border-warn/40 bg-warn/10 p-4 text-sm">
+          <p className="font-semibold text-warn">Falta una migración en la base</p>
+          <p className="mt-1 text-muted">
+            Tu Supabase todavía no tiene las columnas{" "}
+            <span className="tnum">{missingCols.join(", ")}</span>, así que el tipo
+            de actividad y los objetivos no se guardan. Corré{" "}
+            <span className="tnum">
+              supabase/migrations/20260731120000_group_kinds_and_limits.sql
+            </span>{" "}
+            en el SQL Editor y recargá.
+          </p>
+        </div>
+      )}
+
       {parents.length === 0 ? (
         <Empty>Todavía no tenés grupos. Creá el primero.</Empty>
       ) : (
@@ -178,6 +198,11 @@ export default function GroupsManager({ groups, weekByGroup, todayByGroup, onCha
         {!editing?.parentId && (
           <>
             <label className="label mt-4">Tipo de actividad</label>
+            {noKinds && (
+              <p className="mb-2 text-[11px] leading-snug text-warn">
+                Ojo: falta la migración, esto no se va a guardar.
+              </p>
+            )}
             <div className="grid gap-2 sm:grid-cols-3">
               {KIND_LIST.map((k) => (
                 <button
