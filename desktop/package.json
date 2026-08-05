@@ -1,0 +1,53 @@
+{
+  "name": "pomodoro-desktop",
+  "productName": "Pomodoro",
+  "version": "1.0.0",
+  "description": "Pomodoro como app de escritorio: cáscara que carga el deploy en vivo",
+  "author": "Fabri Coronil",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "icons": "node scripts/make-icons.mjs",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.fabricoronil.pomodoro",
+    "productName": "Pomodoro",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "offline.html",
+      "build/icon.png",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pomodoro",
+      "artifactName": "Pomodoro-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Pomodoro-portable-${version}.${ext}"
+    }
+  }
+}

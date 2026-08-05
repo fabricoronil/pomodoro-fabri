@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Pomodoro — sin conexión</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #e9ecf6;
+        --muted: #8b90a4;
+        --accent: #8b5cf6;
+        --accent2: #22d3ee;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        gap: 0;
+        padding: 32px;
+        background: #07080d;
+        color: var(--ink);
+        font: 15px/1.55 system-ui, "Segoe UI", sans-serif;
+        text-align: center;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .card { max-width: 380px; }
+      .ring {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 22px;
+        border-radius: 50%;
+        border: 5px solid transparent;
+        background:
+          linear-gradient(#07080d, #07080d) padding-box,
+          linear-gradient(135deg, var(--accent), var(--accent2)) border-box;
+        opacity: 0.5;
+      }
+      h1 { margin: 0 0 10px; font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+      p { margin: 0 0 6px; color: var(--muted); }
+      .detalle { font-size: 12px; opacity: 0.6; word-break: break-all; }
+      button {
+        margin-top: 22px;
+        padding: 10px 22px;
+        border: 0;
+        border-radius: 10px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        color: #0b0d14;
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      button:hover { filter: brightness(1.08); }
+      .contador { margin-top: 14px; font-size: 12px; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="ring"></div>
+      <h1>No se pudo conectar</h1>
+      <p>Revisá tu conexión a internet. La app se carga desde el servidor, así que necesita red para arrancar.</p>
+      <p class="detalle" id="detalle"></p>
+      <button id="reintentar">Reintentar</button>
+      <div class="contador" id="contador"></div>
+    </div>
+
+    <script>
+      // main.js nos pasa "url|motivo" en el hash.
+      const [url, motivo] = location.hash
+        .slice(1)
+        .split("|")
+        .map((s) => {
+          try {
+            return decodeURIComponent(s || "");
+          } catch {
+            return s || "";
+          }
+        });
+
+      document.getElementById("detalle").textContent = [url, motivo].filter(Boolean).join(" — ");
+
+      const reintentar = () => { if (url) location.href = url; };
+      document.getElementById("reintentar").addEventListener("click", reintentar);
+
+      // Reintento automático cada 15 s, por si la red vuelve sola.
+      let quedan = 15;
+      const contador = document.getElementById("contador");
+      setInterval(() => {
+        quedan -= 1;
+        if (quedan <= 0) return reintentar();
+        contador.textContent = `Reintentando en ${quedan} s…`;
+      }, 1000);
+
+      // Si el sistema avisa que volvió la red, no esperamos el contador.
+      window.addEventListener("online", reintentar);
+    </script>
+  </body>
+</html>

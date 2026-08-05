@@ -5,3 +5,7 @@ out
 .env
 .DS_Store
 *.log
+
+# app de escritorio (los iconos de desktop/build sí se versionan)
+desktop/node_modules
+desktop/dist

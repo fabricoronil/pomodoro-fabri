@@ -227,6 +227,59 @@ En el celular, abrí la URL y usá "Agregar a pantalla de inicio" para que quede
 
 ---
 
+## 5. Instalarla como app de escritorio
+
+Hay dos formas. Las dos se actualizan solas: el contenido siempre sale del último deploy de Vercel, así que **hacés `git push`, Vercel despliega y la próxima vez que abrís la app ya está la versión nueva**. No hay que reinstalar nada.
+
+### Opción A — la rápida (PWA, sin instalar nada raro)
+
+Abrí la URL en Chrome o Edge → icono de **Instalar** en la barra de direcciones (o menú ⋮ → *Aplicaciones → Instalar Pomodoro*). Queda con su ventana, su icono, y en el menú Inicio.
+
+### Opción B — ejecutable propio (`.exe`)
+
+En `desktop/` hay una app de Electron. Es una **cáscara**: no empaqueta la web adentro, la carga desde el deploy en cada arranque, pidiendo el HTML sin caché para no quedarse pegada a una versión vieja.
+
+```bash
+cd desktop
+npm install
+npm run dist
+```
+
+Te deja en `desktop/dist/`:
+
+| Archivo | Qué es |
+| --- | --- |
+| `Pomodoro-Setup-1.0.0.exe` | Instalador: crea acceso directo en el escritorio y en Inicio, y aparece en "Agregar o quitar programas". |
+| `Pomodoro-portable-1.0.0.exe` | Un solo archivo, sin instalar. Lo abrís y listo. |
+
+Para probarla sin empaquetar: `npm start`.
+
+**Qué trae:**
+
+- Ventana propia, sin barra del navegador, con el fondo de la app (nada de flash blanco al abrir).
+- Recuerda tamaño y posición de la ventana.
+- Notificaciones nativas de Windows, ya con permiso concedido.
+- Login con Google: funciona porque la ventana se presenta con el user-agent de Chrome (Google rechaza los navegadores embebidos).
+- Sesión persistente: entrás una vez y queda.
+- Los links externos se abren en tu navegador, no adentro de la app.
+- Sin internet muestra una pantalla propia con reintento automático, en vez del error de Chromium.
+- Una sola instancia: si la abrís de nuevo, enfoca la ventana que ya estaba.
+- Menú con **Alt** (Ctrl+R fuerza recarga sin caché si querés la última versión ya mismo).
+
+**Apuntarla a otro deploy** (por ejemplo, para probar contra `localhost:3000`): editá `url` en
+`%APPDATA%\Pomodoro\config.json` — está en el menú *Ayuda → Abrir carpeta de configuración* —
+o definí la variable `POMODORO_URL`. La URL por defecto está en `desktop/main.js`.
+
+**El `.exe` solo hay que rehacerlo si tocás `desktop/`.** Los cambios de la app web viajan solos.
+
+### Los iconos
+
+Salen todos del mismo dibujo que `app/icon.svg`, generados por `desktop/scripts/make-icons.mjs`
+(`npm run icons` desde `desktop/`): el `.ico` del ejecutable y los PNG del manifest de la PWA.
+Si cambiás el logo, cambialo ahí y volvé a correrlo.
+
+---
+
 ## Estructura
 
 ```
@@ -257,6 +310,13 @@ lib/
   theme.js          presets, derivación de paleta y aplicación del tema
 public/
   sw.js             service worker: recibe el push con la web cerrada
+  manifest.json     para instalarla como PWA
+  icon-*.png        iconos del manifest (generados)
+desktop/            app de escritorio (Electron): carga el deploy en vivo
+  main.js           ventana, navegación, offline, menú
+  preload.js        marca window.pomodoroDesktop
+  offline.html      pantalla de "no se pudo conectar"
+  scripts/make-icons.mjs  genera el .ico y los PNG desde app/icon.svg
 scripts/
   vapid.mjs         genera el par de claves VAPID
 supabase/

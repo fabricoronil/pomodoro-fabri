@@ -5,6 +5,10 @@ export const metadata = {
   description:
     "Timer pomodoro con analítica de tu tiempo (estudio, gimnasio, despeje) y control de sueño",
   manifest: "/manifest.json",
+  applicationName: "Pomodoro",
+  // Para instalarla en iPhone/iPad desde "Compartir → Agregar a inicio".
+  appleWebApp: { capable: true, title: "Pomodoro", statusBarStyle: "black-translucent" },
+  icons: { apple: "/apple-touch-icon.png" },
 };
 
 export const viewport = {
