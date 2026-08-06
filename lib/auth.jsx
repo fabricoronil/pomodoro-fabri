@@ -48,9 +48,20 @@ export function AuthProvider({ children }) {
       setLoading(false);
     });
 
+    // La cáscara de escritorio hace el login afuera, en el navegador de verdad,
+    // y nos pasa los tokens por acá. setSession dispara onAuthStateChange, así
+    // que de la pantalla se encarga el listener de arriba.
+    const bajaEscritorio = window.pomodoroDesktop?.onSesion?.((tokens) => {
+      supabase.auth.setSession(tokens).catch(() => {
+        // token vencido o inválido: se queda en la pantalla de login, que es
+        // lo correcto. Volver a intentar es un click.
+      });
+    });
+
     return () => {
       alive = false;
       sub.subscription.unsubscribe();
+      bajaEscritorio?.();
     };
   }, []);
 

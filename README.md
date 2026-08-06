@@ -283,12 +283,33 @@ web. Es lo único que hay que tocar.
 - Ventana propia, sin barra del navegador, con el fondo de la app (nada de flash blanco al abrir).
 - Recuerda tamaño y posición de la ventana.
 - Notificaciones nativas de Windows, ya con permiso concedido.
-- Login con Google: funciona porque la ventana se presenta con el user-agent de Chrome (Google rechaza los navegadores embebidos).
-- Sesión persistente: entrás una vez y queda.
+- Login por el navegador del sistema (ver abajo). Sesión persistente: entrás una vez y queda.
 - Los links externos se abren en tu navegador, no adentro de la app.
 - Sin internet muestra una pantalla propia con reintento automático, en vez del error de Chromium.
 - Una sola instancia: si la abrís de nuevo, enfoca la ventana que ya estaba.
 - Menú con **Alt** (Ctrl+R fuerza recarga sin caché si querés la última versión ya mismo).
+
+#### El login de la app de escritorio
+
+Google rechaza el login dentro de navegadores embebidos, y disfrazar el user-agent ya no
+alcanza: lo detecta igual y corta con *"este navegador puede no ser seguro"*. Así que el
+login se hace afuera y la sesión vuelve por un link `pomodoro://`:
+
+1. Tocás **Iniciar sesión en el navegador** (o el menú *Ayuda*). La cáscara sortea un
+   `estado` al azar, lo guarda en `%APPDATA%\Pomodoro\login-pendiente.json` y abre el
+   navegador en `https://…/?escritorio=<estado>`.
+2. Entrás normal, con Google o con tu email. La web se anota el `estado` en localStorage
+   antes de irse a Google, porque la vuelta de OAuth pierde el query string.
+3. Con la sesión hecha, la web dispara `pomodoro://auth?estado=…&access_token=…&refresh_token=…`.
+   Windows pregunta si abrís Pomodoro.
+4. La cáscara comprueba que el `estado` sea el que ella sorteó, lo quema (de un solo uso)
+   y le pasa los tokens a la ventana. La web llama a `supabase.auth.setSession` y listo.
+
+El `estado` no es decorativo: sin él, cualquier página que visites podría dispararte un
+`pomodoro://auth?…` con los tokens de otra cuenta y dejarte metido en una sesión ajena.
+
+El email y contraseña, en cambio, sigue funcionando directo adentro de la ventana: eso a
+Google no le importa.
 
 **Apuntarla a otro deploy** (por ejemplo, para probar contra `localhost:3000`): editá `url` en
 `%APPDATA%\Pomodoro\config.json` — está en el menú *Ayuda → Abrir carpeta de configuración* —
@@ -322,6 +343,7 @@ components/
   Settings.jsx      duraciones, alertas, export/import
   PushCard.jsx      "avisarme aunque la web esté cerrada"
   InstallApp.jsx    descarga del .exe / instalación como PWA (tarjeta + botón del header)
+  DesktopHandoff.jsx  devuelve la sesión del navegador a la app de escritorio
   Appearance.jsx    temas, colores y fondo (sección Apariencia)
   ui.jsx            piezas compartidas
 lib/
@@ -339,8 +361,8 @@ public/
   manifest.json     para instalarla como PWA
   icon-*.png        iconos del manifest (generados)
 desktop/            app de escritorio (Electron): carga el deploy en vivo
-  main.js           ventana, navegación, offline, menú
-  preload.js        marca window.pomodoroDesktop
+  main.js           ventana, navegación, offline, menú, login por navegador (pomodoro://)
+  preload.js        marca window.pomodoroDesktop y el puente del login
   offline.html      pantalla de "no se pudo conectar"
   scripts/make-icons.mjs  genera el .ico y los PNG desde app/icon.svg
 scripts/

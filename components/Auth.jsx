@@ -35,6 +35,10 @@ function GoogleMark() {
 
 export default function Auth() {
   const [tab, setTab] = useState("in"); // in | up
+  // Adentro de la app de escritorio el botón de Google no sirve: Google corta
+  // el login en navegadores embebidos. Ahí se sale al navegador de verdad.
+  const [enEscritorio, setEnEscritorio] = useState(false);
+  const [esperandoNavegador, setEsperandoNavegador] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -43,6 +47,10 @@ export default function Auth() {
   const [info, setInfo] = useState("");
 
   const isUp = tab === "up";
+
+  useEffect(() => {
+    setEnEscritorio(!!window.pomodoroDesktop?.isDesktop);
+  }, []);
 
   // Si Google rebota, Supabase vuelve con el motivo en el fragmento de la URL.
   // Sin esto la pantalla se queda muda y parece que no pasó nada.
@@ -64,6 +72,18 @@ export default function Auth() {
     } catch (err) {
       setError(friendlyError(err));
       setBusy(false);
+    }
+  };
+
+  const enNavegador = async () => {
+    setError("");
+    setInfo("");
+    setEsperandoNavegador(true);
+    try {
+      await window.pomodoroDesktop.abrirLogin();
+    } catch {
+      setError("No pude abrir el navegador. Probá desde el menú Ayuda (tocá Alt).");
+      setEsperandoNavegador(false);
     }
   };
 
@@ -149,15 +169,41 @@ export default function Auth() {
         </div>
 
         <div className="card p-5">
-          <button
-            type="button"
-            onClick={withGoogle}
-            disabled={busy}
-            className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-line bg-surface2/60 px-4 py-3 text-sm font-semibold text-ink transition hover:bg-surface3 disabled:opacity-60"
-          >
-            <GoogleMark />
-            Continuar con Google
-          </button>
+          {enEscritorio ? (
+            <>
+              <button
+                type="button"
+                onClick={enNavegador}
+                disabled={busy}
+                className="btn-primary w-full py-3"
+              >
+                {esperandoNavegador ? "Esperando el navegador…" : "Iniciar sesión en el navegador"}
+              </button>
+              <p className="mt-2.5 text-center text-[11px] leading-relaxed text-muted">
+                {esperandoNavegador ? (
+                  <>
+                    Terminá de entrar en la pestaña que se abrió y volvé acá: la sesión
+                    aparece sola. Si no se abrió nada, tocá el botón de nuevo.
+                  </>
+                ) : (
+                  <>
+                    Se abre tu navegador, entrás con Google o con tu email, y la app queda
+                    logueada sola. Google no permite hacerlo desde acá adentro.
+                  </>
+                )}
+              </p>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={withGoogle}
+              disabled={busy}
+              className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-line bg-surface2/60 px-4 py-3 text-sm font-semibold text-ink transition hover:bg-surface3 disabled:opacity-60"
+            >
+              <GoogleMark />
+              Continuar con Google
+            </button>
+          )}
 
           <div className="my-5 flex items-center gap-3">
             <span className="h-px flex-1 bg-line" />

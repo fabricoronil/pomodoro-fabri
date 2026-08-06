@@ -1,7 +1,7 @@
 {
   "name": "pomodoro-desktop",
   "productName": "Pomodoro",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Pomodoro como app de escritorio: cáscara que carga el deploy en vivo",
   "author": "Fabri Coronil",
   "private": true,
@@ -19,6 +19,12 @@
   "build": {
     "appId": "com.fabricoronil.pomodoro",
     "productName": "Pomodoro",
+    "protocols": [
+      {
+        "name": "Pomodoro",
+        "schemes": ["pomodoro"]
+      }
+    ],
     "directories": {
       "output": "dist",
       "buildResources": "build"

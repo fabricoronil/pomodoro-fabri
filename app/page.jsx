@@ -9,6 +9,7 @@ import Sleep from "@/components/Sleep";
 import GroupsManager from "@/components/GroupsManager";
 import SettingsPanel from "@/components/Settings";
 import { DownloadButton } from "@/components/InstallApp";
+import DesktopHandoff, { pedidoDeEscritorio, olvidarPedido } from "@/components/DesktopHandoff";
 import {
   listSessions,
   loadSettings,
@@ -44,9 +45,15 @@ export default function Page() {
 function Gate() {
   const { user, loading, needsAuth } = useAuth();
 
+  // Login que empezó en la app de escritorio: la cáscara abre el navegador acá
+  // y espera que le devolvamos la sesión. Se lee en un efecto (y no en el
+  // primer render) porque el HTML lo genera el servidor, donde no hay URL.
+  const [pedido, setPedido] = useState(null);
+
   // el tema se pinta también en la pantalla de login
   useEffect(() => {
     applyTheme(loadSettings().theme);
+    setPedido(pedidoDeEscritorio());
   }, []);
 
   if (loading) {
@@ -57,6 +64,20 @@ function Gate() {
     );
   }
   if (needsAuth) return <Auth />;
+
+  // ya hay sesión: si la pidió la app de escritorio, se la damos antes de
+  // entrar (si no, quedaría logueado el navegador y la app seguiría afuera)
+  if (pedido) {
+    return (
+      <DesktopHandoff
+        estado={pedido}
+        onSeguirAca={() => {
+          olvidarPedido();
+          setPedido(null);
+        }}
+      />
+    );
+  }
 
   // key: al cambiar de cuenta la app se reinicia limpia
   return (
