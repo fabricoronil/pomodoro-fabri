@@ -8,6 +8,7 @@ import {
   signInWithGoogle,
   signUp,
 } from "@/lib/auth";
+import { DESKTOP_VERSION, SETUP_URL } from "@/lib/install";
 
 /** Logotipo de Google, con sus cuatro colores oficiales */
 function GoogleMark() {
@@ -37,7 +38,12 @@ export default function Auth() {
   const [tab, setTab] = useState("in"); // in | up
   // Adentro de la app de escritorio el botón de Google no sirve: Google corta
   // el login en navegadores embebidos. Ahí se sale al navegador de verdad.
-  const [enEscritorio, setEnEscritorio] = useState(false);
+  //
+  // Ojo con "escritorio" a secas: la web se actualiza sola en cada arranque,
+  // pero la cáscara no. Una v1.0.0 instalada carga esta misma página sin tener
+  // idea de qué es `abrirLogin`, así que hay que preguntar por la función y no
+  // solo por isDesktop. Si no, el botón aparece y explota al tocarlo.
+  const [escritorio, setEscritorio] = useState({ es: false, sabeAbrirLogin: false });
   const [esperandoNavegador, setEsperandoNavegador] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -49,7 +55,11 @@ export default function Auth() {
   const isUp = tab === "up";
 
   useEffect(() => {
-    setEnEscritorio(!!window.pomodoroDesktop?.isDesktop);
+    const d = window.pomodoroDesktop;
+    setEscritorio({
+      es: !!d?.isDesktop,
+      sabeAbrirLogin: typeof d?.abrirLogin === "function",
+    });
   }, []);
 
   // Si Google rebota, Supabase vuelve con el motivo en el fragmento de la URL.
@@ -82,7 +92,9 @@ export default function Auth() {
     try {
       await window.pomodoroDesktop.abrirLogin();
     } catch {
-      setError("No pude abrir el navegador. Probá desde el menú Ayuda (tocá Alt).");
+      setError(
+        "No pude abrir el navegador. Entrá a pomodoro-fabri.vercel.app a mano y logueate ahí."
+      );
       setEsperandoNavegador(false);
     }
   };
@@ -169,7 +181,23 @@ export default function Auth() {
         </div>
 
         <div className="card p-5">
-          {enEscritorio ? (
+          {escritorio.es && !escritorio.sabeAbrirLogin ? (
+            // Cáscara vieja: no sabe abrir el navegador ni recibir la sesión de
+            // vuelta, y Google no la deja entrar desde adentro. Sin actualizar
+            // no hay forma; el mail y contraseña de abajo sí le funciona.
+            <div className="rounded-xl border border-warn/40 bg-warn/10 p-4 text-xs leading-relaxed text-warn">
+              <b>Tu app de escritorio quedó vieja.</b> Esta versión no sabe abrir el
+              navegador para iniciar sesión, así que con Google no vas a poder entrar
+              desde acá.
+              <a href={SETUP_URL} className="btn-primary mt-3 w-full text-sm">
+                Descargar la versión {DESKTOP_VERSION}
+              </a>
+              <p className="mt-2 text-[11px] opacity-80">
+                Se instala encima de la que tenés. Mientras tanto, podés entrar con tu
+                email y contraseña acá abajo.
+              </p>
+            </div>
+          ) : escritorio.es ? (
             <>
               <button
                 type="button"
