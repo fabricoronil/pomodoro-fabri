@@ -8,7 +8,9 @@ export const metadata = {
   applicationName: "Pomodoro",
   // Para instalarla en iPhone/iPad desde "Compartir → Agregar a inicio".
   appleWebApp: { capable: true, title: "Pomodoro", statusBarStyle: "black-translucent" },
-  icons: { apple: "/apple-touch-icon.png" },
+  // Los íconos NO se declaran acá: los toma Next de los archivos de app/
+  // (icon.png, favicon.ico, apple-icon.png), que además ganan sobre
+  // metadata.icons. Se regeneran todos con `./scripts/icons.sh <imagen>`.
 };
 
 export const viewport = {

@@ -1,17 +1,15 @@
 /**
- * Genera los iconos de la app a partir del mismo dibujo que `app/icon.svg`.
+ * LEGACY. Ya no se usa: los íconos de la app salen de una imagen real, con
+ * `./scripts/icons.sh` (desde la raíz del repo). Este archivo queda como
+ * referencia del logo vectorial original (también guardado en git como
+ * `app/icon.svg`), que dibujaba las cuatro formas a mano.
  *
- * No usamos ninguna librería: rasterizamos las cuatro formas del logo (cuadrado
- * redondeado, borde, anillo abierto y agujas) con distancias con signo y
- * escribimos el PNG a mano (zlib viene en Node). Salida:
+ * Si lo corrés, pisa `desktop/build/icon.*` y los PNG de `public/` con el
+ * dibujo viejo. Correlo solo si querés volver a ese logo.
  *
- *   desktop/build/icon.ico   -> icono del .exe y del instalador
- *   desktop/build/icon.png   -> icono para Linux / referencia
- *   public/icon-192.png      -> manifest PWA
- *   public/icon-512.png      -> manifest PWA
- *   public/apple-touch-icon.png
- *
- * Correlo con:  npm run icons   (desde desktop/)
+ * Rasteriza sin ninguna librería: las cuatro formas del logo (cuadrado
+ * redondeado, borde, anillo abierto y agujas) con distancias con signo, y
+ * escribe el PNG a mano (zlib viene en Node).
  */
 
 import zlib from "node:zlib";

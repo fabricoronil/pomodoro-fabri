@@ -319,9 +319,19 @@ o definí la variable `POMODORO_URL`. La URL por defecto está en `desktop/main.
 
 ### Los iconos
 
-Salen todos del mismo dibujo que `app/icon.svg`, generados por `desktop/scripts/make-icons.mjs`
-(`npm run icons` desde `desktop/`): el `.ico` del ejecutable y los PNG del manifest de la PWA.
-Si cambiás el logo, cambialo ahí y volvé a correrlo.
+Salen todos de **una sola imagen**, `scripts/logo.png` (o `.jpg`/`.svg`), con:
+
+```bash
+./scripts/icons.sh                      # regenera todo desde scripts/logo.*
+./scripts/icons.sh ~/Pictures/nuevo.png # cambia el logo (y lo guarda como fuente)
+```
+
+Necesita ImageMagick. De ahí salen el ícono de la pestaña (`app/icon.png`, `app/favicon.ico`),
+el de "Agregar a inicio" de iPhone (`app/apple-icon.png`), los del manifest para Android
+—incluidos los *maskable*, con el logo al 80% para que el sistema no le coma los bordes al
+recortarlo en círculo— y el `.ico` del ejecutable de escritorio.
+
+El dibujo vectorial original quedó en `desktop/scripts/make-icons-legacy.mjs`, sin uso.
 
 ---
 
@@ -359,13 +369,15 @@ lib/
 public/
   sw.js             service worker: recibe el push con la web cerrada
   manifest.json     para instalarla como PWA
-  icon-*.png        iconos del manifest (generados)
+  icon-*.png        iconos del manifest, incluidos los maskable (generados)
 desktop/            app de escritorio (Electron): carga el deploy en vivo
   main.js           ventana, navegación, offline, menú, login por navegador (pomodoro://)
   preload.js        marca window.pomodoroDesktop y el puente del login
   offline.html      pantalla de "no se pudo conectar"
-  scripts/make-icons.mjs  genera el .ico y los PNG desde app/icon.svg
+  scripts/make-icons-legacy.mjs  el logo vectorial viejo (sin uso)
 scripts/
+  icons.sh          genera todos los iconos desde scripts/logo.*
+  logo.*            la imagen fuente del logo
   vapid.mjs         genera el par de claves VAPID
 supabase/
   functions/notify-timers/index.ts   el que mira el reloj del lado del servidor
