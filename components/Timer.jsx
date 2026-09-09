@@ -16,7 +16,7 @@ import {
   writeMirror,
 } from "@/lib/timerSync";
 import { dailyGoalMin, goalTypeOf, weeklyGoalMin } from "@/lib/kinds";
-import { Modal, GoalLine } from "./ui";
+import { Modal, NumField, GoalLine } from "./ui";
 import GroupPicker from "./GroupPicker";
 import LogTime from "./LogTime";
 
@@ -105,6 +105,8 @@ export default function Timer({
   const [idle, setIdle] = useState(false);
   const [logging, setLogging] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [ending, setEnding] = useState(null); // sesión a punto de cerrarse, esperando confirmación
+  const [keepMin, setKeepMin] = useState(0);
   const shellRef = useRef(null);
   const idleTimer = useRef(null);
   const claiming = useRef(false);
@@ -475,9 +477,9 @@ export default function Timer({
   };
 
   /** Corta el bloque en curso: guarda lo hecho (si es enfoque) y sigue */
-  const finishNow = async (save) => {
+  const finishNow = async (save, seconds = null) => {
     const state = tRef.current;
-    const done = Math.max(0, duration - remaining);
+    const done = seconds == null ? Math.max(0, duration - remaining) : seconds;
     const wasFocus = state.mode === "focus";
     const nextMode = nextModeAfter(state);
 
@@ -498,7 +500,8 @@ export default function Timer({
 
     const saved = await saveSession({
       seconds: done,
-      startedAt: state.started_at,
+      // si recortaste el tiempo, el inicio se recalcula desde el final
+      startedAt: seconds == null ? state.started_at : null,
       endedAt: iso(Date.now()),
       groupId: state.sub_group_id || state.group_id || activeGroupId,
     });
@@ -507,9 +510,9 @@ export default function Timer({
   };
 
   /** Modo libre: frenar y guardar lo cronometrado */
-  const stopFree = async () => {
+  const stopFree = async (seconds = null) => {
     const state = tRef.current;
-    const secs = elapsed;
+    const secs = seconds == null ? elapsed : seconds;
     commit({
       status: "idle",
       started_at: null,
@@ -519,14 +522,45 @@ export default function Timer({
       duration_seconds: null,
     });
     if (settings.sound) beep(settings.volume, 2);
+    if (secs < 60) return;
     const saved = await saveSession({
       seconds: secs,
-      startedAt: state.started_at,
+      startedAt: seconds == null ? state.started_at : null,
       endedAt: iso(Date.now()),
       groupId: state.sub_group_id || state.group_id || activeGroupId,
     });
     if (saved) say(`Guardado · ${fmtDur(secs)}`);
     askNote(saved);
+  };
+
+  /**
+   * "Terminar": congela lo que va corrido y pregunta qué hacer con eso.
+   *
+   * Antes el botón guardaba de una todo el tiempo contado, así que si el timer
+   * quedó abierto sin querer (o te fuiste a hacer otra cosa) el rato muerto se
+   * anotaba igual. Ahora el reloj se detiene recién al confirmar, y podés
+   * guardar todo, guardar solo una parte, o descartarlo.
+   */
+  const askEnd = async () => {
+    const secs = countUp ? elapsed : Math.max(0, duration - remaining);
+    // en pantalla completa nativa el modal quedaría tapado
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+    } catch {
+      /* seguimos igual */
+    }
+    setKeepMin(Math.round(secs / 60));
+    setEnding({ seconds: secs, countUp });
+  };
+
+  const confirmEnd = async (save) => {
+    const info = ending;
+    setEnding(null);
+    if (!info) return;
+    const secs = save ? Math.max(0, Math.round(keepMin * 60)) : 0;
+    if (info.countUp) await stopFree(secs);
+    else await finishNow(save && secs >= 60, secs);
+    if (!save) say("Terminado sin guardar");
   };
 
   const switchMode = (m) => {
@@ -694,8 +728,8 @@ export default function Timer({
           </button>
         )}
         {countUp ? (
-          <button onClick={stopFree} className="btn-ghost px-6 py-3">
-            Frenar y guardar
+          <button onClick={askEnd} className="btn-ghost px-6 py-3">
+            Terminar
           </button>
         ) : (
           <button onClick={cancel} className="btn-ghost px-6 py-3">
@@ -899,8 +933,8 @@ export default function Timer({
               )}
 
               {countUp ? (
-                <button onClick={stopFree} disabled={elapsed < 60} className="btn-ghost py-3">
-                  Frenar y guardar
+                <button onClick={askEnd} disabled={t.status === "idle"} className="btn-ghost py-3">
+                  Terminar
                 </button>
               ) : (
                 <>
@@ -908,8 +942,8 @@ export default function Timer({
                     {t.status === "idle" ? "Reiniciar" : "Cancelar"}
                   </button>
                   {t.mode === "focus" && remaining < duration - 59 && (
-                    <button onClick={() => finishNow(true)} className="btn-ghost py-3">
-                      Frenar y guardar
+                    <button onClick={askEnd} className="btn-ghost py-3">
+                      Terminar
                     </button>
                   )}
                   <button onClick={() => finishNow(false)} className="btn-quiet py-3">
@@ -1038,6 +1072,63 @@ export default function Timer({
         </div>
       </div>
 
+      <Modal
+        open={!!ending}
+        onClose={() => setEnding(null)}
+        title={`Terminar · ${fmtDur(ending?.seconds || 0)} en el reloj`}
+      >
+        <p className="text-sm text-muted">
+          ¿Cuánto de esto le metiste de verdad? Si el timer quedó abierto de más, bajá los
+          minutos o descartá la sesión entera.
+        </p>
+
+        <div className="mt-4 flex items-center gap-2">
+          <NumField
+            value={keepMin}
+            onChange={setKeepMin}
+            min={0}
+            max={Math.max(1, Math.ceil((ending?.seconds || 0) / 60))}
+            step={5}
+            suffix="min"
+            className="w-40"
+          />
+          <button
+            onClick={() => setKeepMin(Math.round((ending?.seconds || 0) / 60))}
+            className="chip px-2.5 py-1 text-[11px]"
+          >
+            todo
+          </button>
+          {[15, 30, 60].map(
+            (m) =>
+              (ending?.seconds || 0) / 60 >= m && (
+                <button
+                  key={m}
+                  onClick={() => setKeepMin(m)}
+                  className={`chip px-2.5 py-1 text-[11px] ${keepMin === m ? "chip-on" : ""}`}
+                >
+                  {fmtDur(m * 60)}
+                </button>
+              )
+          )}
+        </div>
+
+        {keepMin < 1 && (
+          <p className="mt-3 text-xs text-muted">Con menos de 1 minuto no se guarda nada.</p>
+        )}
+
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button onClick={() => setEnding(null)} className="btn-quiet">
+            Seguir contando
+          </button>
+          <button onClick={() => confirmEnd(false)} className="btn-ghost">
+            Descartar
+          </button>
+          <button onClick={() => confirmEnd(true)} disabled={keepMin < 1} className="btn-primary">
+            Guardar {fmtDur(keepMin * 60)}
+          </button>
+        </div>
+      </Modal>
+
       <Modal open={!!noteFor} onClose={() => setNoteFor(null)} title="¿Qué hiciste en esta sesión?">
         <textarea
           autoFocus
@@ -1069,7 +1160,7 @@ export default function Timer({
         onSpace={() => (running ? pause() : start())}
         onR={cancel}
         onF={toggleFs}
-        disabled={editing || !!noteFor || logging || picking}
+        disabled={editing || !!noteFor || !!ending || logging || picking}
       />
     </div>
   );
